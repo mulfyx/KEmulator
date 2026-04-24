@@ -3,6 +3,8 @@ Copyright (c) 2024 Arman Jussupgaliyev
 */
 package emulator;
 
+import emulator.automation.worker.AutomationWorkerRuntime;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Vector;
@@ -89,6 +91,14 @@ public class Permission {
 			return null;
 		if (!askImei) return "0000000000000000";
 		if (imei != null) return imei;
+		if (AutomationWorkerRuntime.isEnabled()) {
+			if (!showConfirmDialog("Allow the application to access the device IMEI?")) {
+				notAllowPerms.add("imei");
+				return null;
+			}
+			allowPerms.add("imei");
+			return imei = "0000000000000000";
+		}
 		String s = Emulator.getEmulator().getScreen().showIMEIDialog();
 		if (s == null) {
 			notAllowPerms.add("imei");
@@ -98,6 +108,9 @@ public class Permission {
 	}
 
 	public static boolean showConfirmDialog(final String message) {
+		if (AutomationWorkerRuntime.isEnabled()) {
+			return AutomationWorkerRuntime.requestPermission(message);
+		}
 		return Emulator.getEmulator().getScreen().showSecurityDialog(message);
 	}
 
@@ -127,7 +140,7 @@ public class Permission {
 				throw new SecurityException(x);
 			case ask_always_until_no:
 				if (notAllowPerms.contains(x))
-					return;
+					throw new SecurityException(x);
 				if (!showConfirmDialog(localizePerm(x))) {
 					notAllowPerms.add(x);
 					throw new SecurityException(x);
@@ -183,6 +196,6 @@ public class Permission {
 					": " + url);
 		}
 
-		return Emulator.getEmulator().getScreen().showSecurityDialog(text);
+		return showConfirmDialog(text);
 	}
 }
