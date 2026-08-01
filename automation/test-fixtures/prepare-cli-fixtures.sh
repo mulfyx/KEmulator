@@ -5,10 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 DEFAULT_OUTPUT_DIR="$ROOT_DIR/automation/test-fixtures/cli-pack"
-COMMAND_BUILD_SCRIPT="$ROOT_DIR/automation/test-fixtures/build-command-fixture.sh"
-AUTO_BUILD_SCRIPT="$ROOT_DIR/automation/test-fixtures/build-auto-snapshot-fixture.sh"
-MUTABLE_BUILD_SCRIPT="$ROOT_DIR/automation/test-fixtures/build-mutable-title-fixture.sh"
-MEGA_BUILD_SCRIPT="$ROOT_DIR/automation/test-fixtures/build-mega-cli-fixture.sh"
+BUILD_FIXTURES_SCRIPT="$ROOT_DIR/automation/test-fixtures/build-fixtures.sh"
 
 usage() {
   cat <<'EOF'
@@ -107,10 +104,7 @@ fi
 rm -rf -- "$OUTPUT_DIR"
 mkdir -p -- "$FIXTURE_JARS_DIR" "$DESCRIPTOR_DIR" "$INVALID_DIR/empty-dir"
 
-"$COMMAND_BUILD_SCRIPT" "$RUNTIME_CLASSPATH" "$COMMAND_FIXTURE_JAR"
-"$AUTO_BUILD_SCRIPT" "$RUNTIME_CLASSPATH" "$AUTO_SNAPSHOT_FIXTURE_JAR"
-"$MUTABLE_BUILD_SCRIPT" "$RUNTIME_CLASSPATH" "$MUTABLE_TITLE_FIXTURE_JAR"
-"$MEGA_BUILD_SCRIPT" "$RUNTIME_CLASSPATH" "$MEGA_CLI_FIXTURE_JAR"
+"$BUILD_FIXTURES_SCRIPT" "$RUNTIME_CLASSPATH" "$FIXTURE_JARS_DIR"
 
 "$PYTHON_BIN" - "$COMMAND_FIXTURE_JAR" "$MEGA_CLI_FIXTURE_JAR" "$DESCRIPTOR_DIR" "$INVALID_DIR" <<'PY'
 from pathlib import Path
@@ -126,6 +120,12 @@ parent_jars_dir = descriptor_dir / "jars"
 bom_manifest_jar = descriptor_dir / "bom-manifest.jar"
 multi_midlet_jar = descriptor_dir / "multi-midlet.jar"
 manifest_extra_jar = descriptor_dir / "manifest-extra.jar"
+props_plain_jar = descriptor_dir / "props-plain.jar"
+props_manifest_jar = descriptor_dir / "props-manifest.jar"
+startup_permission_jar = descriptor_dir / "startup-permission.jar"
+file_probe_jar = descriptor_dir / "file-probe.jar"
+form_controls_jar = descriptor_dir / "form-controls.jar"
+rms_counter_jar = descriptor_dir / "rms-counter.jar"
 mega_space_jar = descriptor_dir / "mega space.jar"
 mega_parent_jar = parent_jars_dir / "mega-parent.jar"
 mega_multi_midlet_jar = descriptor_dir / "mega-multi-midlet.jar"
@@ -217,6 +217,134 @@ with zipfile.ZipFile(mega_jar, "r") as source, zipfile.ZipFile(mega_multi_midlet
             "\r\n"
         ).encode("utf-8"),
     )
+
+def with_manifest(source_path, target_path, manifest_lines):
+    manifest = "".join(line + "\r\n" for line in manifest_lines) + "\r\n"
+    with zipfile.ZipFile(source_path, "r") as source, zipfile.ZipFile(target_path, "w") as target:
+        for entry in source.infolist():
+            if entry.filename.upper() == "META-INF/MANIFEST.MF":
+                continue
+            target.writestr(entry, source.read(entry.filename))
+        target.writestr("META-INF/MANIFEST.MF", manifest.encode("utf-8"))
+
+BASE_COMMAND_MANIFEST = [
+    "Manifest-Version: 1.0",
+    "MIDlet-1: Command Fixture,,fixtures.CommandFixtureMidlet",
+    "MIDlet-Name: Command Fixture",
+    "MIDlet-Vendor: KEmulator",
+    "MIDlet-Version: 1.0.0",
+    "MicroEdition-Configuration: CLDC-1.1",
+    "MicroEdition-Profile: MIDP-2.0",
+]
+
+# Suite-property merge fixtures: the command fixture uses Fixture-Menu-Title
+# as its menu title, so property propagation is observable end to end.
+with_manifest(fixture_jar, props_plain_jar, BASE_COMMAND_MANIFEST)
+with_manifest(
+    fixture_jar,
+    props_manifest_jar,
+    BASE_COMMAND_MANIFEST + ["Fixture-Menu-Title: MANIFEST ONLY TITLE"],
+)
+with_manifest(
+    fixture_jar,
+    startup_permission_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: Startup Permission Fixture,,fixtures.StartupPermissionFixtureMidlet",
+        "MIDlet-Name: Startup Permission Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+with_manifest(
+    fixture_jar,
+    file_probe_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: File Probe Fixture,,fixtures.FileProbeFixtureMidlet",
+        "MIDlet-Name: File Probe Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+with_manifest(
+    fixture_jar,
+    form_controls_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: Form Controls Fixture,,fixtures.FormControlsFixtureMidlet",
+        "MIDlet-Name: Form Controls Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+with_manifest(
+    fixture_jar,
+    rms_counter_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: RMS Counter Fixture,,fixtures.RmsCounterFixtureMidlet",
+        "MIDlet-Name: RMS Counter Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+
+(descriptor_dir / "props-jad-only.jad").write_text(
+    "MIDlet-1: Command Fixture,,fixtures.CommandFixtureMidlet\n"
+    "MIDlet-Name: Command Fixture\n"
+    "MIDlet-Jar-URL: props-plain.jar\n"
+    "Fixture-Menu-Title: JAD ONLY TITLE\n",
+    encoding="utf-8",
+)
+
+(descriptor_dir / "props-manifest-fallback.jad").write_text(
+    "MIDlet-1: Command Fixture,,fixtures.CommandFixtureMidlet\n"
+    "MIDlet-Name: Command Fixture\n"
+    "MIDlet-Jar-URL: props-manifest.jar\n",
+    encoding="utf-8",
+)
+
+(descriptor_dir / "props-override.jad").write_text(
+    "MIDlet-1: Command Fixture,,fixtures.CommandFixtureMidlet\n"
+    "MIDlet-Name: Command Fixture\n"
+    "MIDlet-Jar-URL: props-manifest.jar\n"
+    "Fixture-Menu-Title: JAD OVERRIDE TITLE\n",
+    encoding="utf-8",
+)
+
+(descriptor_dir / "props-multi-midlet.jad").write_text(
+    "MIDlet-1: Mutable Title Fixture,,fixtures.MutableTitleFixtureMidlet\n"
+    "MIDlet-2: Command Fixture,,fixtures.CommandFixtureMidlet\n"
+    "MIDlet-Name: Props Multi Fixture\n"
+    "MIDlet-Jar-URL: props-plain.jar\n"
+    "Fixture-Menu-Title: MULTI JAD TITLE\n",
+    encoding="utf-8",
+)
+
+(descriptor_dir / "probe-memorycard.jad").write_text(
+    "MIDlet-1: File Probe Fixture,,fixtures.FileProbeFixtureMidlet\n"
+    "MIDlet-Name: File Probe Fixture\n"
+    "MIDlet-Jar-URL: file-probe.jar\n"
+    "Fixture-File-Url: memorycard\n",
+    encoding="utf-8",
+)
+
+(descriptor_dir / "probe-drive-e.jad").write_text(
+    "MIDlet-1: File Probe Fixture,,fixtures.FileProbeFixtureMidlet\n"
+    "MIDlet-Name: File Probe Fixture\n"
+    "MIDlet-Jar-URL: file-probe.jar\n"
+    "Fixture-File-Url: file:///E:/probe-e.txt\n",
+    encoding="utf-8",
+)
 
 with zipfile.ZipFile(no_manifest_jar, "w") as target:
     target.writestr("fixtures/empty.txt", b"empty\n")
@@ -321,6 +449,18 @@ write_env_var "$ENV_FILE" "MANIFEST_EXTRA_JAD" "$DESCRIPTOR_DIR/manifest-extra.j
 write_env_var "$ENV_FILE" "BOM_MANIFEST_JAR" "$DESCRIPTOR_DIR/bom-manifest.jar"
 write_env_var "$ENV_FILE" "MULTI_MIDLET_JAR" "$DESCRIPTOR_DIR/multi-midlet.jar"
 write_env_var "$ENV_FILE" "MEGA_MULTI_MIDLET_JAR" "$DESCRIPTOR_DIR/mega-multi-midlet.jar"
+write_env_var "$ENV_FILE" "PROPS_PLAIN_JAR" "$DESCRIPTOR_DIR/props-plain.jar"
+write_env_var "$ENV_FILE" "PROPS_MANIFEST_JAR" "$DESCRIPTOR_DIR/props-manifest.jar"
+write_env_var "$ENV_FILE" "PROPS_JAD_ONLY_JAD" "$DESCRIPTOR_DIR/props-jad-only.jad"
+write_env_var "$ENV_FILE" "PROPS_MANIFEST_FALLBACK_JAD" "$DESCRIPTOR_DIR/props-manifest-fallback.jad"
+write_env_var "$ENV_FILE" "PROPS_OVERRIDE_JAD" "$DESCRIPTOR_DIR/props-override.jad"
+write_env_var "$ENV_FILE" "PROPS_MULTI_MIDLET_JAD" "$DESCRIPTOR_DIR/props-multi-midlet.jad"
+write_env_var "$ENV_FILE" "STARTUP_PERMISSION_JAR" "$DESCRIPTOR_DIR/startup-permission.jar"
+write_env_var "$ENV_FILE" "FILE_PROBE_JAR" "$DESCRIPTOR_DIR/file-probe.jar"
+write_env_var "$ENV_FILE" "FORM_CONTROLS_JAR" "$DESCRIPTOR_DIR/form-controls.jar"
+write_env_var "$ENV_FILE" "RMS_COUNTER_JAR" "$DESCRIPTOR_DIR/rms-counter.jar"
+write_env_var "$ENV_FILE" "PROBE_MEMORYCARD_JAD" "$DESCRIPTOR_DIR/probe-memorycard.jad"
+write_env_var "$ENV_FILE" "PROBE_DRIVE_E_JAD" "$DESCRIPTOR_DIR/probe-drive-e.jad"
 write_env_var "$ENV_FILE" "PLAIN_TEXT_JAR" "$INVALID_DIR/plain-text.jar"
 write_env_var "$ENV_FILE" "EMPTY_JAR" "$INVALID_DIR/empty.jar"
 write_env_var "$ENV_FILE" "NO_MANIFEST_JAR" "$INVALID_DIR/no-manifest.jar"

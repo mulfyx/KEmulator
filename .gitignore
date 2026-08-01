@@ -44,3 +44,25 @@ micro3d_*.jar
 KEmulator_x64.jar
 kemulator-debug.jar
 version.mf
+
+# release/build artifacts
+dist/
+.build-release/
+
+# automation runtime and fixture build outputs
+automation/run/
+automation/logs/
+automation/captures/
+automation/sessions/
+automation/games/
+automation/test-fixtures/build*/
+automation/test-fixtures/cli-pack/
+
+# agent session leftovers
+.tmp-*/
+.codex/
+.agents/
+
+# python test tooling
+__pycache__/
+.pytest_cache/
