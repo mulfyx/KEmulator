@@ -46,11 +46,22 @@ def test_start_parser_errors(kemu, kemu_factory):
 
 
 def test_removed_legacy_surface(kemu):
-    kemu.err("wait", "1", code="UNKNOWN_COMMAND")
-    kemu.err("key", "FIRE", code="UNKNOWN_COMMAND")
-    kemu.err("tap", "10", "20", code="UNKNOWN_COMMAND")
-    kemu.err("logs", "worker", code="UNKNOWN_COMMAND")
+    # Known group + removed/unknown subcommand: usage error with group usage.
+    kemu.err("wait", "1", code="USAGE_ERROR")
+    kemu.err("key", "FIRE", code="USAGE_ERROR")
+    kemu.err("logs", "worker", code="USAGE_ERROR")
+    kemu.err("logs", "wait", "--regex", "x", code="USAGE_ERROR")  # removed alias
     kemu.err("command", "run", "1", "--snapshot", "1", code="USAGE_ERROR")
+    # Unknown root token: unknown command.
+    kemu.err("tap", "10", "20", code="UNKNOWN_COMMAND")
+
+
+def test_bare_groups_are_usage_errors(kemu):
+    for group in ("logs", "wait", "key", "pointer", "list", "choice",
+                  "gauge", "text-field", "text-box", "rms", "events",
+                  "command"):
+        outcome = kemu.err(group, code="USAGE_ERROR")
+        assert f"kemu {group}" in outcome.error["message"], group
 
 
 def test_open_parser_errors(kemu, fixtures):

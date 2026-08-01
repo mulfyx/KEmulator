@@ -16,22 +16,12 @@ import emulator.cli.parse.CliParsing;
 import mjson.Json;
 
 public final class WaitLogCommand implements CliCommand {
-	private final boolean logsAlias;
-
-	public WaitLogCommand() {
-		this(false);
-	}
-
-	public WaitLogCommand(boolean logsAlias) {
-		this.logsAlias = logsAlias;
-	}
-
 	public CommandPath path() {
-		return logsAlias ? CommandPath.of("logs", "wait") : CommandPath.of("wait", "log");
+		return CommandPath.of("wait", "log");
 	}
 
 	private KemuCliException usage(boolean json) {
-		String commandName = logsAlias ? "logs wait" : "wait log";
+		String commandName = "wait log";
 		return new KemuCliException(
 			"USAGE_ERROR",
 			"Usage: kemu " + commandName + " --regex REGEX [--since CURSOR] [--timeout MS]",
@@ -42,7 +32,7 @@ public final class WaitLogCommand implements CliCommand {
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
 		boolean json = invocation.json();
-		String commandName = logsAlias ? "logs wait" : "wait log";
+		String commandName = "wait log";
 		String regex = null;
 		String since = null;
 		int timeoutMs = 5000;
