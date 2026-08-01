@@ -193,6 +193,8 @@ public final class CommandFixtureMidlet extends MIDlet implements CommandListene
 		private String status = "Tap or drag";
 		private int startX = -1;
 		private int startY = -1;
+		private int lastWidth = -1;
+		private int lastHeight = -1;
 		private boolean dragged;
 
 		private TouchCanvas() {
@@ -207,6 +209,17 @@ public final class CommandFixtureMidlet extends MIDlet implements CommandListene
 			graphics.drawString("Touch fixture", 20, 24, Graphics.LEFT | Graphics.TOP);
 			graphics.drawString(status, 20, 52, Graphics.LEFT | Graphics.TOP);
 			graphics.drawString("drag between points", 20, 80, Graphics.LEFT | Graphics.TOP);
+		}
+
+		protected void sizeChanged(int w, int h) {
+			// The initial layout also calls sizeChanged; only report actual
+			// changes so title-based flows keep their expected titles.
+			boolean changed = lastWidth != -1 && (w != lastWidth || h != lastHeight);
+			lastWidth = w;
+			lastHeight = h;
+			if (changed) {
+				updateStatus("Size " + w + "x" + h);
+			}
 		}
 
 		protected void pointerPressed(int x, int y) {
