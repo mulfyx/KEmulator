@@ -13,7 +13,9 @@ public final class AutomationErrorCodes {
 	public static final String PERMISSION_ORDER_VIOLATION = "PERMISSION_ORDER_VIOLATION";
 	public static final String SCREENSHOT_FAILED = "SCREENSHOT_FAILED";
 	public static final String STALE_REVISION = "STALE_REVISION";
+	public static final String STORAGE_OVERLAP = "STORAGE_OVERLAP";
 	public static final String TIMEOUT = "TIMEOUT";
+	public static final String WORKER_STARTING = "WORKER_STARTING";
 	public static final String LCDUI_CONTROL_UNAVAILABLE = "LCDUI_CONTROL_UNAVAILABLE";
 	public static final String UNKNOWN_COMMAND_ID = "UNKNOWN_COMMAND_ID";
 	public static final String UNKNOWN_KEY = "UNKNOWN_KEY";

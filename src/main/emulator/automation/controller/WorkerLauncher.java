@@ -72,7 +72,8 @@ final class WorkerLauncher {
 		WorkerLaunchOptions options = WorkerLaunchOptions.prepare(
 			request,
 			logsRoot.getParent(),
-			runtimeRoot);
+			runtimeRoot,
+			java.util.Arrays.asList(entry.jadPath, entry.jarPath, entry.launchPath));
 		Path kemHome = WorkerLaunchEnvironment.resolveKemHome();
 		Path javaAgent = WorkerLaunchEnvironment.resolveJavaAgentJar();
 		ArrayList<String> command = new ArrayList<String>();

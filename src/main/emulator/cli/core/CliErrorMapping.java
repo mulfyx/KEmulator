@@ -26,7 +26,8 @@ public final class CliErrorMapping {
 			|| AutomationErrorCodes.UNKNOWN_COMMAND_ID.equals(code)
 			|| AutomationErrorCodes.STALE_REVISION.equals(code)
 			|| AutomationErrorCodes.UNKNOWN_PERMISSION_ID.equals(code)
-			|| AutomationErrorCodes.PERMISSION_ORDER_VIOLATION.equals(code)) {
+			|| AutomationErrorCodes.PERMISSION_ORDER_VIOLATION.equals(code)
+			|| AutomationErrorCodes.STORAGE_OVERLAP.equals(code)) {
 			return CliExitCodes.USAGE;
 		}
 
