@@ -68,18 +68,54 @@ public final class AppInspector {
 		return entries;
 	}
 
-	private static void mergeManifest(Properties target, Manifest manifest) {
+	private static boolean isMidletListKey(String key) {
+		if (!key.startsWith("MIDlet-")) {
+			return false;
+		}
+
+		try {
+			Integer.parseInt(key.substring("MIDlet-".length()));
+
+			return true;
+		} catch (NumberFormatException ignored) {
+			return false;
+		}
+	}
+
+	/**
+	 * Canonical suite-property merge: descriptor (JAD) values win per key,
+	 * MANIFEST fills in missing keys. When the descriptor defines its own
+	 * MIDlet-1, MANIFEST MIDlet-&lt;n&gt; entries are not merged so the
+	 * descriptor keeps control of the launchable MIDlet list.
+	 */
+	public static void mergeSuiteProperties(Properties target, Manifest manifest) {
 		if (manifest == null) {
 			return;
 		}
 
+		boolean descriptorDefinesPrimaryMidlet = target.getProperty("MIDlet-1") != null;
 		Attributes attrs = manifest.getMainAttributes();
 		for (Map.Entry<Object, Object> entry : attrs.entrySet()) {
 			String key = String.valueOf(entry.getKey());
-			if (target.getProperty(key) == null) {
-				target.put(key, String.valueOf(entry.getValue()));
+			if (target.getProperty(key) != null) {
+				continue;
 			}
+
+			if (descriptorDefinesPrimaryMidlet && isMidletListKey(key)) {
+				continue;
+			}
+
+			target.put(key, String.valueOf(entry.getValue()));
 		}
+	}
+
+	/**
+	 * Merges the JAR MANIFEST main attributes into {@code target} with
+	 * {@link #mergeSuiteProperties} semantics. Tolerates a UTF-8 BOM before
+	 * the manifest bytes.
+	 */
+	public static void mergeJarManifest(Properties target, Path jarPath) {
+		mergeSuiteProperties(target, loadManifest(jarPath));
 	}
 
 	private static Path siblingJarPath(Path descriptorPath) {
@@ -355,26 +391,18 @@ public final class AppInspector {
 			jadPath = existingSiblingDescriptorPath(jarPath);
 			if (jadPath != null) {
 				props.putAll(loadProperties(jadPath));
-				boolean descriptorDefinesPrimaryMidlet = props.containsKey("MIDlet-1");
-				manifest = loadManifest(jarPath);
-				if (!descriptorDefinesPrimaryMidlet) {
-					mergeManifest(props, manifest);
-				}
-			} else {
-				manifest = loadManifest(jarPath);
-				mergeManifest(props, manifest);
 			}
+
+			manifest = loadManifest(jarPath);
+			mergeSuiteProperties(props, manifest);
 		} else {
 			sourceKind = "jad";
 			jadPath = input;
 			props.putAll(loadProperties(jadPath));
-			boolean descriptorDefinesPrimaryMidlet = props.containsKey("MIDlet-1");
 			jarPath = resolveDescriptorJarPath(jadPath, props);
 			ensureDescriptorJarExists(jarPath);
 			manifest = loadManifest(jarPath);
-			if (!descriptorDefinesPrimaryMidlet) {
-				mergeManifest(props, manifest);
-			}
+			mergeSuiteProperties(props, manifest);
 		}
 
 		List<MidletDescriptor> midlets = parseMidlets(props);
@@ -393,6 +421,7 @@ public final class AppInspector {
 			displayName,
 			props.getProperty("MIDlet-Vendor"),
 			props.getProperty("MIDlet-Version"),
-			midlets);
+			midlets,
+			props);
 	}
 }

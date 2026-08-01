@@ -337,30 +337,37 @@ public class Emulator implements Runnable {
 							Emulator.emulatorimpl.getLogStream().println("Get class " + replace);
 						}
 					}
-					if (props == null || !props.containsKey(doja ? "AppClass" : "MIDlet-1")) {
-						try {
-							final Attributes mainAttributes = midletJar.getManifest().getMainAttributes();
-							for (final Map.Entry<Object, Object> entry : mainAttributes.entrySet()) {
-								props.put(entry.getKey().toString(), entry.getValue());
-							}
-							if (!props.containsKey(doja ? "AppClass" : "MIDlet-1")) throw new Exception();
-						} catch (Exception ex2) {
-							final InputStream inputStream;
-							(inputStream = midletJar.getInputStream(midletJar.getEntry("META-INF/MANIFEST.MF"))).skip(3L);
-							props.load(new InputStreamReader(inputStream, "UTF-8"));
-							inputStream.close();
-							final Enumeration<Object> keys2 = props.keys();
-							while (keys2.hasMoreElements()) {
-								final String s2 = (String) keys2.nextElement();
-								props.put(s2, props.getProperty(s2));
+					if (doja) {
+						if (!props.containsKey("AppClass")) {
+							try {
+								final Attributes mainAttributes = midletJar.getManifest().getMainAttributes();
+								for (final Map.Entry<Object, Object> entry : mainAttributes.entrySet()) {
+									props.put(entry.getKey().toString(), entry.getValue());
+								}
+								if (!props.containsKey("AppClass")) throw new Exception();
+							} catch (Exception ex2) {
+								final InputStream inputStream;
+								(inputStream = midletJar.getInputStream(midletJar.getEntry("META-INF/MANIFEST.MF"))).skip(3L);
+								props.load(new InputStreamReader(inputStream, "UTF-8"));
+								inputStream.close();
+								final Enumeration<Object> keys2 = props.keys();
+								while (keys2.hasMoreElements()) {
+									final String s2 = (String) keys2.nextElement();
+									props.put(s2, props.getProperty(s2));
+								}
 							}
 						}
+					} else {
+						// Shared JAD/MANIFEST merge semantics with the automation inspector:
+						// JAD keys win, MANIFEST fills the rest, MANIFEST-only keys survive.
+						emulator.automation.shared.AppInspector.mergeJarManifest(
+								props, Paths.get(Emulator.midletJarPath));
 					}
 				}
+				Emulator.emulatorimpl.setAppProperties(props);
 				if (Emulator.midletClassName != null) {
 					return true;
 				}
-				Emulator.emulatorimpl.setAppProperties(props);
 				if (props.containsKey("MIDlet-2") && props.containsKey("MIDlet-1")) {
 					// find all midlets and show choice window
 					Vector<String> midletKeys = new Vector<String>();

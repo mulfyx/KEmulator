@@ -2,6 +2,8 @@ package emulator.cli.library;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import mjson.Json;
 
 public final class InspectionResult {
@@ -15,6 +17,7 @@ public final class InspectionResult {
 	public final String version;
 	public final List<MidletEntry> midlets;
 	public final String selectedMidletClass;
+	public final Map<String, String> suiteProperties;
 
 	public InspectionResult(
 		Path inputPath,
@@ -26,7 +29,8 @@ public final class InspectionResult {
 		String vendor,
 		String version,
 		List<MidletEntry> midlets,
-		String selectedMidletClass) {
+		String selectedMidletClass,
+		Map<String, String> suiteProperties) {
 		this.inputPath = inputPath;
 		this.launchPath = launchPath;
 		this.jarPath = jarPath;
@@ -37,12 +41,18 @@ public final class InspectionResult {
 		this.version = version;
 		this.midlets = midlets;
 		this.selectedMidletClass = selectedMidletClass;
+		this.suiteProperties = suiteProperties;
 	}
 
 	public Json toJson() {
 		Json midletsJson = Json.array();
 		for (MidletEntry entry : midlets) {
 			midletsJson.add(entry.toJson());
+		}
+
+		Json propertiesJson = Json.object();
+		for (Map.Entry<String, String> entry : new TreeMap<String, String>(suiteProperties).entrySet()) {
+			propertiesJson.set(entry.getKey(), entry.getValue());
 		}
 
 		return Json.object()
@@ -55,6 +65,7 @@ public final class InspectionResult {
 			.set("vendor", vendor)
 			.set("version", version)
 			.set("midlets", midletsJson)
-			.set("selectedMidletClass", selectedMidletClass);
+			.set("selectedMidletClass", selectedMidletClass)
+			.set("suiteProperties", propertiesJson);
 	}
 }
