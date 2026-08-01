@@ -91,6 +91,40 @@ final class WorkerLaunchOptions {
 		});
 	}
 
+	private static Path realOrNormalized(Path path) {
+		if (path == null) {
+			return null;
+		}
+		try {
+			return path.toRealPath();
+		} catch (IOException ignored) {
+			return path.toAbsolutePath().normalize();
+		}
+	}
+
+	private static void rejectLaunchArtifactOverlap(Path resetRoot, String rootName, List<Path> launchPaths) {
+		Path resetReal = realOrNormalized(resetRoot);
+		if (resetReal == null || !Files.exists(resetRoot)) {
+			return;
+		}
+		for (Path launchPath : launchPaths) {
+			if (launchPath == null) {
+				continue;
+			}
+			Path launchReal = realOrNormalized(launchPath);
+			if (launchReal.startsWith(resetReal)) {
+				throw new AutomationException(
+					AutomationErrorCodes.STORAGE_OVERLAP,
+					"Refusing --reset-state: " + rootName + " contains the launch artifact "
+						+ launchPath + ". Nothing was deleted.",
+					mjson.Json.object()
+						.set("resetRoot", resetRoot.toString())
+						.set("resetRootName", rootName)
+						.set("launchPath", launchPath.toString()));
+			}
+		}
+	}
+
 	private static void copyLegacyFileRoot(Path runtimeRoot, final Path fileRoot)
 		throws IOException {
 		final Path legacyRoot = runtimeRoot.resolve("file").resolve("root").normalize();
@@ -195,7 +229,8 @@ final class WorkerLaunchOptions {
 		return options;
 	}
 
-	static WorkerLaunchOptions prepare(Json request, Path sessionRoot, Path runtimeRoot) throws IOException {
+	static WorkerLaunchOptions prepare(
+		Json request, Path sessionRoot, Path runtimeRoot, List<Path> launchPaths) throws IOException {
 		Path dataDir = path(request, "dataDir", sessionRoot.resolve("data"));
 		Path rmsDir = path(request, "rmsDir", dataDir.resolve("rms"));
 		Path fileRoot = path(request, "fileRoot", dataDir.resolve("files"));
@@ -215,12 +250,38 @@ final class WorkerLaunchOptions {
 			"fileRoot",
 			explicitlyConfigured(request, "fileRoot"));
 		if (request.at("resetState", false).asBoolean()) {
-			deleteTree(dataDir);
+			boolean fileRootExplicit = explicitlyConfigured(request, "fileRoot");
+			boolean resetFileRoot = !fileRootExplicit || request.at("resetFileRoot", false).asBoolean();
+			ArrayList<Path> resetRoots = new ArrayList<Path>();
+			ArrayList<String> resetRootNames = new ArrayList<String>();
+			resetRoots.add(dataDir);
+			resetRootNames.add("dataDir");
 			if (!rmsDir.startsWith(dataDir)) {
-				deleteTree(rmsDir);
+				resetRoots.add(rmsDir);
+				resetRootNames.add("rmsDir");
 			}
-			if (!fileRoot.startsWith(dataDir) && !fileRoot.startsWith(rmsDir)) {
-				deleteTree(fileRoot);
+			if (resetFileRoot && !fileRoot.startsWith(dataDir) && !fileRoot.startsWith(rmsDir)) {
+				resetRoots.add(fileRoot);
+				resetRootNames.add("fileRoot");
+			}
+			if (!resetFileRoot
+				&& (fileRoot.startsWith(dataDir) || rmsDir.startsWith(fileRoot) || dataDir.startsWith(fileRoot))) {
+				throw new AutomationException(
+					AutomationErrorCodes.STORAGE_OVERLAP,
+					"Refusing --reset-state: explicit --file-root overlaps the session data tree "
+						+ "and would be deleted with it. Nothing was deleted.",
+					mjson.Json.object()
+						.set("fileRoot", fileRoot.toString())
+						.set("dataDir", dataDir.toString())
+						.set("rmsDir", rmsDir.toString()));
+			}
+			// Resolve every overlap before the first deletion so a rejected
+			// request leaves the disk untouched.
+			for (int i = 0; i < resetRoots.size(); i++) {
+				rejectLaunchArtifactOverlap(resetRoots.get(i), resetRootNames.get(i), launchPaths);
+			}
+			for (Path resetRoot : resetRoots) {
+				deleteTree(resetRoot);
 			}
 		}
 		if (!explicitlyConfigured(request, "fileRoot")) {
