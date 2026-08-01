@@ -65,7 +65,6 @@ public final class KemuMain {
 		registry.add(new ConditionWaitCommand("frame"));
 		registry.add(new ConditionWaitCommand("permission"));
 		registry.add(new WaitLogCommand());
-		registry.add(new WaitLogCommand(true));
 		registry.add(new KeyActionCommand("press"));
 		registry.add(new KeyActionCommand("hold"));
 		registry.add(new PointerTapCommand());
@@ -78,7 +77,6 @@ public final class KemuMain {
 		registry.add(new LcduiControlCommand("text-box", "set"));
 		registry.add(new ScreenSizeCommand(false));
 		registry.add(new ScreenSizeCommand(true));
-		registry.add(new CommandRootCommand());
 		registry.add(new RunUiCommand());
 		registry.add(new PermissionCommand());
 		registry.add(new EventsReadCommand());

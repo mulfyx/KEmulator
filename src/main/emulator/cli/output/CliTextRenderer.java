@@ -86,7 +86,6 @@ public final class CliTextRenderer {
 			+ "  kemu stop [--force] [--json]\n"
 			+ "  kemu logs cursor [--json]\n"
 			+ "  kemu logs read [--since CURSOR] [--jsonl] [--json]\n"
-			+ "  kemu logs wait --regex REGEX [--since CURSOR] [--timeout MS] [--json]\n"
 			+ "  kemu inspect <path> [--json]\n"
 			+ "  kemu open <path> [--data-dir DIR] [--rms-dir DIR] [--file-root DIR]"
 			+ " [--reset-state] [--reset-file-root] [--worker-xmx SIZE]"
@@ -137,14 +136,11 @@ public final class CliTextRenderer {
 			return "kemu stop [--force] [--json]";
 		if ("logs".equals(topic))
 			return "kemu logs cursor [--json]\n"
-				+ "       kemu logs read [--since CURSOR] [--jsonl] [--json]\n"
-				+ "       kemu logs wait --regex REGEX [--since CURSOR] [--timeout MS] [--json]";
+				+ "       kemu logs read [--since CURSOR] [--jsonl] [--json]";
 		if ("logs cursor".equals(topic))
 			return "kemu logs cursor [--json]";
 		if ("logs read".equals(topic))
 			return "kemu logs read [--since CURSOR] [--jsonl] [--json]";
-		if ("logs wait".equals(topic))
-			return "kemu logs wait --regex REGEX [--since CURSOR] [--timeout MS] [--json]";
 		if ("inspect".equals(topic))
 			return "kemu inspect <path> [--json]";
 		if ("open".equals(topic))

@@ -103,6 +103,14 @@ public final class CliApp {
 
 		CliCommand command = registry.resolve(tokens);
 		if (command == null) {
+			// Uniform group handling: a known command group with a missing or
+			// unknown subcommand is a usage error with the group usage text.
+			String group = tokens.get(0);
+			if (CliTextRenderer.hasUsageTopic(group)) {
+				throw new KemuCliException(
+					"USAGE_ERROR", CliTextRenderer.usageText(group), CliExitCodes.USAGE, group, json);
+			}
+
 			throw new KemuCliException(
 				"UNKNOWN_COMMAND", "Unknown command: " + tokens.get(0), CliExitCodes.USAGE, tokens.get(0), json);
 		}

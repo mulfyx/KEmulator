@@ -17,10 +17,6 @@ def test_logs_cursor_read_wait(kemu, fixtures):
     read_since = kemu.ok("logs", "read", "--since", cursor)
     assert read_since["fromOffset"] >= 0
 
-    waited = kemu.ok("logs", "wait", "--regex", "Launch MIDlet class",
-                     "--timeout", "5000")
-    assert waited["matched"] is True
-
     waited = kemu.ok("wait", "log", "--regex", "Launch MIDlet class",
                      "--timeout", "5000")
     assert waited["matched"] is True

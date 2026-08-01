@@ -89,7 +89,7 @@ A worker in the `starting` state is already registered: `state`, `observe`,
 `startApp()` has returned. Commands sent before the worker socket accepts
 connections are retried briefly and then fail with `WORKER_STARTING`.
 
-After a failed `open`, `logs cursor`, `logs read`, and `logs wait` still
+After a failed `open`, `logs cursor`, `logs read`, and `wait log` still
 address the failed worker until the next `open` or an explicit `close`.
 
 ## Commands
@@ -100,7 +100,6 @@ address the failed worker until the next `open` or an explicit `close`.
 - `stop [--force]`
 - `logs cursor`
 - `logs read [--since CURSOR] [--jsonl]`
-- `logs wait --regex REGEX [--since CURSOR] [--timeout MS]`
 - `inspect <path>`
 - `open <path> [--midlet N] [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR] [--reset-state] [--reset-file-root] [--worker-xmx SIZE] [--wait-ready] [--open-timeout MS]`
 - `close`
@@ -228,6 +227,7 @@ Common error codes include:
 - `MIDLET_SELECTION_REQUIRED`
 - `UNKNOWN_MIDLET`
 - `STALE_REVISION`
+- `STORAGE_ERROR`
 - `STORAGE_OVERLAP`
 - `TIMEOUT`
 - `WORKER_STARTING`
@@ -509,7 +509,7 @@ Worker log cursors are opaque:
 
 ```bash
 cursor="$(./kemu.sh logs cursor --json | jq -r '.result.cursor')"
-./kemu.sh logs wait --since "$cursor" --regex 'STATUS=PASS' --timeout 10000
+./kemu.sh wait log --since "$cursor" --regex 'STATUS=PASS' --timeout 10000
 ./kemu.sh logs read --since "$cursor" --jsonl
 ```
 
