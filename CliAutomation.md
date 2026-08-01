@@ -56,12 +56,41 @@ run that bundle's `./kemu.sh`.
 For `.jad` files, `MIDlet-Jar-URL` should resolve to a local relative JAR path.
 If it is missing, the inspector tries a sibling `.jar` with the same base name.
 
+`inspect` returns `suiteProperties`: the merged JAD/MANIFEST map exactly as the
+app sees it through `MIDlet.getAppProperty()`. JAD keys win per key, MANIFEST
+fills in missing keys, and MANIFEST-only keys survive even when the JAD defines
+its own `MIDlet-1`. When the JAD defines `MIDlet-1`, the launchable MIDlet list
+comes from the JAD alone. The worker applies the same merge, so
+`suiteProperties` is authoritative for what a running MIDlet will read.
+
 ## Lifecycle
 
 `open` starts the controller automatically when needed, then opens the requested
 MIDlet. `close` closes only the active MIDlet. `stop --force` stops the
 controller runtime and should be reserved for cleanup, recovery, or changing
 controller defaults.
+
+`open` without `--wait-ready` returns right after the worker process is
+spawned. The result carries `status: "starting"`, `ready: false`, and the
+worker identity; use `wait worker-ready` (or `observe`) to wait for the MIDlet.
+`open --wait-ready` blocks until one of:
+
+- the MIDlet display is ready: `status: "ready"`;
+- a permission request blocked `startApp()`: `status: "pending-permission"`
+  with `permissionRequest` set. Answer it with `permission allow|deny` and
+  continue with `wait worker-ready`;
+- the worker exits: `WORKER_FAILURE` with `details.reason: "worker-exited"`,
+  the exit code, `logTail`, and a `causeHint` line extracted from the log;
+- the startup timeout elapses: `OPEN_TIMEOUT`. The default timeout is 30000 ms
+  and `--open-timeout MS` (1..600000) overrides it.
+
+A worker in the `starting` state is already registered: `state`, `observe`,
+`logs`, `wait permission`, and `permission allow|deny` reach it before
+`startApp()` has returned. Commands sent before the worker socket accepts
+connections are retried briefly and then fail with `WORKER_STARTING`.
+
+After a failed `open`, `logs cursor`, `logs read`, and `logs wait` still
+address the failed worker until the next `open` or an explicit `close`.
 
 ## Commands
 
@@ -73,7 +102,7 @@ controller defaults.
 - `logs read [--since CURSOR] [--jsonl]`
 - `logs wait --regex REGEX [--since CURSOR] [--timeout MS]`
 - `inspect <path>`
-- `open <path> [--midlet N] [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR] [--reset-state] [--worker-xmx SIZE] [--wait-ready]`
+- `open <path> [--midlet N] [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR] [--reset-state] [--reset-file-root] [--worker-xmx SIZE] [--wait-ready] [--open-timeout MS]`
 - `close`
 - `state`
 - `state snapshot FILE`
@@ -100,6 +129,9 @@ controller defaults.
 - `choice set INDEX [--item-index INDEX] [--expect-revision REV]`
 - `gauge set VALUE [--item-index INDEX] [--expect-revision REV]`
 - `text-field set TEXT [--item-index INDEX] [--expect-revision REV]`
+- `text-box set TEXT [--expect-revision REV]`
+- `resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS]`
+- `rotate [--expect-revision REV] [--wait-frame] [--timeout MS]`
 - `command run <--id ID|--label LABEL> --expect-revision REV [--wait-next-display] [--timeout MS]`
 - `permission allow [id] [--once|--always]`
 - `permission deny [id]`
@@ -196,7 +228,9 @@ Common error codes include:
 - `MIDLET_SELECTION_REQUIRED`
 - `UNKNOWN_MIDLET`
 - `STALE_REVISION`
+- `STORAGE_OVERLAP`
 - `TIMEOUT`
+- `WORKER_STARTING`
 - `LCDUI_CONTROL_UNAVAILABLE`
 - `UNKNOWN_KEY`
 - `UNKNOWN_COMMAND_ID`
@@ -419,6 +453,14 @@ from the bundle's legacy `file/root` directory when the session file root does
 not yet exist. Later reads and writes use only the session copy. Explicit data,
 RMS, and file roots that overlap the runtime bundle are rejected.
 
+`--reset-state` deletes the session data tree (data dir, RMS dir, and the
+implicit session file root). An explicit `--file-root` is treated as external
+storage and is preserved; deleting it requires the additional opt-in
+`--reset-file-root`. Before anything is deleted, every reset root is checked
+against the launch JAD/JAR (symlinks resolved): if a reset root contains a
+launch artifact, `open` fails with `STORAGE_OVERLAP` before any mutation, so a
+rejected request leaves the disk untouched.
+
 ```bash
 ./kemu.sh --session-id a open app.jar \
   --data-dir /tmp/kemu-a \
@@ -439,6 +481,22 @@ replace so another MIDlet thread cannot observe a truncated index.
 `--worker-xmx` replaces any `-Xmx` in that variable. `status --json` reports
 controller and worker JVM options, both PIDs, data paths, and the configured
 emulated heap when one exists.
+
+### Memory card mapping
+
+The guest property `fileconn.dir.memorycard` defaults to `file:///root/e/`,
+which maps to the `e/` directory under the session file root. Drive-letter
+URLs are case-insensitive: `file:///E:/x` and `file:///e:/x` resolve to the
+same `<fileRoot>/e/x` host path. The effective mapping is visible in
+`open`, `state`, and `observe` responses as:
+
+```json
+"memoryCard": {
+  "guestUrl": "file:///root/e/",
+  "fileRoot": "/tmp/kemu-a/files",
+  "hostPath": "/tmp/kemu-a/files/e"
+}
+```
 
 ## Event And Log Cursors
 
@@ -479,7 +537,13 @@ Reset a stuck run with:
 - `CONTROLLER_UNREACHABLE`: run `./kemu.sh stop --force --json`, then start
   again.
 - `NO_ACTIVE_APP` from `logs read` after `close`: expected when no MIDlet is
-  active.
+  active. After a failed `open`, `logs read` still works and returns the
+  failed worker log.
+- `WORKER_STARTING`: the worker process exists but its command socket is not
+  accepting connections yet; retry, or use `wait worker-ready`.
+- `STORAGE_OVERLAP`: a `--reset-state` root would delete the launch JAD/JAR or
+  an explicit `--file-root`; nothing was deleted. Move the writable roots away
+  from the launch artifacts or pass `--reset-file-root` intentionally.
 - `STALE_REVISION`: run `observe --json` again and retry with the new revision.
 - `SCREENSHOT_WRITE_FAILED`: check the parent directory, permissions, and that
   `--out` is a file path. A non-`.png` extension is a `USAGE_ERROR`.
