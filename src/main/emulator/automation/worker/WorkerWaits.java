@@ -35,6 +35,21 @@ final class WorkerWaits {
 			&& !request.at("title").asString().equals(displayable.at("title", "").asString())) {
 			return false;
 		}
+		if (request.has("titleRegex") && !request.at("titleRegex").isNull()) {
+			String pattern = request.at("titleRegex").asString();
+			java.util.regex.Pattern compiled;
+			try {
+				compiled = java.util.regex.Pattern.compile(pattern);
+			} catch (java.util.regex.PatternSyntaxException e) {
+				throw new AutomationException(
+					AutomationErrorCodes.INVALID_REQUEST,
+					"Invalid title regex: " + e.getMessage(),
+					mjson.Json.object().set("titleRegex", pattern));
+			}
+			if (!compiled.matcher(displayable.at("title", "").asString()).find()) {
+				return false;
+			}
+		}
 		if (request.has("selectedIndex")
 			&& !request.at("selectedIndex").isNull()
 			&& request.at("selectedIndex").asInteger()

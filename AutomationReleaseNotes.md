@@ -7,6 +7,18 @@ dated. Changes that break existing automation scripts are marked
 
 ## 2026-08-01
 
+- Closed the agent-facing gaps from `automation/ROADMAP.md`:
+  `wait display --title-regex`; softkey-only commands (BACK/EXIT) are now
+  listed with `softkey`/`softkeyOnly` markers and invokable by id;
+  `observe --screenshot FILE` captures state and image in one worker call;
+  `pause`/`resume` drive the MIDlet lifecycle (`pauseApp()` now runs for
+  non-Canvas displayables too); `key down`/`key up` and `pointer down`/
+  `pointer up` enable chords and holds; `date-field set EPOCH_MS` completes
+  the LCDUI setter surface (the snapshot reports `date`/`inputMode`).
+- Added `kemu bridge`: a JSONL mode serving many commands from one CLI
+  process ({"id", "argv": [...]} per stdin line, envelope + echoed id per
+  stdout line). Removes the per-command JVM startup cost for agents and the
+  test suite; session id is fixed per bridge process.
 - **BREAKING** Contract uniformity sweep. Success is expressed only by the
   envelope (`result.ok` duplicates removed everywhere, including
   health/shutdown). Every wait returns `{condition, matched, elapsedMs}` plus

@@ -36,15 +36,25 @@ public final class ScreenshotCommand implements CliCommand {
 			Json.object(),
 			"screenshot",
 			invocation.json()));
+		saveImage(payload, out, "screenshot", invocation.json());
+
+		return new CommandResult("screenshot", out.toString(), payload, invocation.json());
+	}
+
+	/**
+	 * Writes the base64 image out of a screenshot payload and replaces it with
+	 * {@code saved}/{@code path} metadata. Shared with `observe --screenshot`.
+	 */
+	static void saveImage(Json payload, Path out, String commandName, boolean json) {
 		String imageBase64 = payload.at("imageBase64", Json.nil()).isNull()
 			? null
 			: payload.at("imageBase64").asString();
 		if (imageBase64 == null || imageBase64.length() == 0) {
 			throw new KemuCliException(
-				AutomationErrorCodes.SCREENSHOT_FAILED,
+				emulator.automation.shared.AutomationErrorCodes.SCREENSHOT_FAILED,
 				"Controller did not return image data.",
-				"screenshot",
-				invocation.json());
+				commandName,
+				json);
 		}
 
 		byte[] imageBytes;
@@ -52,10 +62,10 @@ public final class ScreenshotCommand implements CliCommand {
 			imageBytes = Base64.getDecoder().decode(imageBase64);
 		} catch (IllegalArgumentException e) {
 			throw new KemuCliException(
-				AutomationErrorCodes.SCREENSHOT_FAILED,
+				emulator.automation.shared.AutomationErrorCodes.SCREENSHOT_FAILED,
 				"Controller returned invalid image data.",
-				"screenshot",
-				invocation.json());
+				commandName,
+				json);
 		}
 
 		Path parent = out.getParent();
@@ -69,15 +79,13 @@ public final class ScreenshotCommand implements CliCommand {
 			throw new KemuCliException(
 				CliErrorCodes.SCREENSHOT_WRITE_FAILED,
 				"Could not write screenshot to " + out + ": " + e.getMessage(),
-				"screenshot",
-				invocation.json(),
+				commandName,
+				json,
 				Json.object().set("path", out.toString()));
 		}
 
 		payload.delAt("imageBase64");
 		payload.set("saved", true);
 		payload.set("path", out.toString());
-
-		return new CommandResult("screenshot", out.toString(), payload, invocation.json());
 	}
 }

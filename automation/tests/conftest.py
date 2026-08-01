@@ -91,7 +91,7 @@ def fixtures(release_dir, tmp_path_factory) -> dict:
 def known_commands(release_dir) -> set[str]:
     """The public command surface, machine-readable from the registry."""
     probe = KemuCli(release_dir, session_id=f"pt-probe-{uuid.uuid4().hex[:8]}")
-    commands = set(probe.ok("help")["commands"])
+    commands = set(probe.ok("help", oneshot=True)["commands"])
     assert "open" in commands and "list select" in commands, commands
     return commands
 
@@ -117,6 +117,7 @@ def kemu_factory(release_dir, known_commands):
     for cli in created:
         cli.close_quietly()
         cli.stop_force_quietly()
+        cli.shutdown_bridge()
 
 
 @pytest.fixture(scope="session")

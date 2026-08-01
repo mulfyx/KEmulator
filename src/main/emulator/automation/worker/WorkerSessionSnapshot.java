@@ -11,6 +11,7 @@ import javax.microedition.lcdui.Alert;
 import javax.microedition.lcdui.AutomationStateExtractor;
 import javax.microedition.lcdui.Canvas;
 import javax.microedition.lcdui.ChoiceGroup;
+import javax.microedition.lcdui.DateField;
 import javax.microedition.lcdui.Display;
 import javax.microedition.lcdui.Displayable;
 import javax.microedition.lcdui.Form;
@@ -62,6 +63,9 @@ final class WorkerSessionSnapshot {
 		if (item instanceof TextField) {
 			return "text-field";
 		}
+		if (item instanceof DateField) {
+			return "date-field";
+		}
 		return item == null ? "none" : item.getClass().getName();
 	}
 
@@ -98,6 +102,11 @@ final class WorkerSessionSnapshot {
 			result.set("constraints", textField.getConstraints());
 			result.set("maxSize", textField.getMaxSize());
 			result.set("caret", textField.getCaretPosition());
+		} else if (item instanceof DateField) {
+			DateField dateField = (DateField) item;
+			java.util.Date date = dateField.getDate();
+			result.set("date", date == null ? null : Long.valueOf(date.getTime()));
+			result.set("inputMode", dateField.getInputMode());
 		}
 		return result;
 	}
@@ -207,7 +216,7 @@ final class WorkerSessionSnapshot {
 				}
 
 				Json commands = WorkerCommands.observe(
-					current, permission, AutomationStateExtractor.buildCommands(current));
+					current, permission, AutomationStateExtractor.buildAutomationCommands(current));
 				for (Json command : commands.asJsonList()) {
 					if (command.has("type") && !command.at("type").isNull()) {
 						command.set("typeName", commandTypeName(command.at("type").asInteger()));
@@ -229,6 +238,7 @@ final class WorkerSessionSnapshot {
 				result.set(
 					"jvmOptions",
 					Json.make(ManagementFactory.getRuntimeMXBean().getInputArguments()));
+				result.set("paused", Emulator.getEventQueue() != null && Emulator.getEventQueue().isPaused());
 				result.set("dataDir", System.getProperty("kemu.data.dir"));
 				result.set("rmsDir", System.getProperty("kemu.rms.dir"));
 				result.set("fileRoot", System.getProperty("kemu.file.root"));

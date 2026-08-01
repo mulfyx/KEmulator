@@ -66,6 +66,38 @@ public final class AutomationStateExtractor {
 		return displayable == null ? new Vector<TargetedCommand>() : displayable.buildAllCommands();
 	}
 
+	public static Command getLeftSoftCommand(Displayable displayable) {
+		return displayable == null ? null : displayable.getLeftSoftCommand();
+	}
+
+	public static Command getRightSoftCommand(Displayable displayable) {
+		return displayable == null ? null : displayable.getRightSoftCommand();
+	}
+
+	/**
+	 * The command list automation exposes: the LCDUI menu list plus softkey
+	 * commands that the menu omits (BACK/EXIT-style right softkey), so an
+	 * agent can invoke them by id instead of guessing a key press.
+	 */
+	public static Vector<TargetedCommand> buildAutomationCommands(Displayable displayable) {
+		Vector<TargetedCommand> commands = buildCommands(displayable);
+		Command rightSoft = getRightSoftCommand(displayable);
+		if (rightSoft == null) {
+			return commands;
+		}
+
+		for (int i = 0; i < commands.size(); i++) {
+			TargetedCommand candidate = commands.get(i);
+			if (candidate != null && candidate.command == rightSoft) {
+				return commands;
+			}
+		}
+
+		commands.add(new TargetedCommand(rightSoft, displayable));
+
+		return commands;
+	}
+
 	public static int getChoiceType(ChoiceGroup choiceGroup) {
 		return choiceGroup == null ? -1 : choiceGroup.choiceType;
 	}

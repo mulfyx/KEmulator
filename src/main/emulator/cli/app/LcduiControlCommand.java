@@ -53,6 +53,11 @@ public final class LcduiControlCommand implements CliCommand {
 			request.set("direction", invocation.tokens().get(valueIndex));
 		} else if ("text-field".equals(group) || "text-box".equals(group)) {
 			request.set("value", invocation.tokens().get(valueIndex));
+		} else if ("date-field".equals(group)) {
+			request.set(
+				"value",
+				CliParsing.parseLongArgument(
+					invocation.tokens().get(valueIndex), "<epoch-ms>", commandName(), json));
 		} else {
 			String key = "gauge".equals(group) ? "value" : "index";
 			request.set(
@@ -97,7 +102,8 @@ public final class LcduiControlCommand implements CliCommand {
 						commandName(),
 						json));
 			} else if ("--item-index".equals(token)
-				&& ("choice".equals(group) || "gauge".equals(group) || "text-field".equals(group))) {
+				&& ("choice".equals(group) || "gauge".equals(group) || "text-field".equals(group)
+					|| "date-field".equals(group))) {
 				if (request.has("itemIndex")) {
 					throw CliParsing.duplicateOption(token, commandName(), json);
 				}

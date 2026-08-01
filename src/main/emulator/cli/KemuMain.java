@@ -47,7 +47,9 @@ public final class KemuMain {
 	private static CliApp createCliApp() {
 		CommandRegistry registry = new CommandRegistry();
 		HelpCommand helpCommand = new HelpCommand(registry);
+		BridgeCommand bridgeCommand = new BridgeCommand();
 		registry.add(helpCommand);
+		registry.add(bridgeCommand);
 		registry.add(new StatusCommand());
 		registry.add(new StartCommand());
 		registry.add(new StopCommand());
@@ -68,7 +70,11 @@ public final class KemuMain {
 		registry.add(new WaitLogCommand());
 		registry.add(new KeyActionCommand("press"));
 		registry.add(new KeyActionCommand("hold"));
-		registry.add(new PointerTapCommand());
+		registry.add(new KeyActionCommand("down"));
+		registry.add(new KeyActionCommand("up"));
+		registry.add(new PointerActionCommand("tap"));
+		registry.add(new PointerActionCommand("down"));
+		registry.add(new PointerActionCommand("up"));
 		registry.add(new DragCommand());
 		registry.add(new LcduiControlCommand("list", "select"));
 		registry.add(new LcduiControlCommand("list", "move"));
@@ -76,6 +82,9 @@ public final class KemuMain {
 		registry.add(new LcduiControlCommand("gauge", "set"));
 		registry.add(new LcduiControlCommand("text-field", "set"));
 		registry.add(new LcduiControlCommand("text-box", "set"));
+		registry.add(new LcduiControlCommand("date-field", "set"));
+		registry.add(new AppLifecycleCommand("pause"));
+		registry.add(new AppLifecycleCommand("resume"));
 		registry.add(new ScreenSizeCommand(false));
 		registry.add(new ScreenSizeCommand(true));
 		registry.add(new RunUiCommand());
@@ -87,7 +96,10 @@ public final class KemuMain {
 		registry.add(new SessionStorageCommand("state", "snapshot"));
 		registry.add(new SessionStorageCommand("state", "restore"));
 
-		return new CliApp(registry, helpCommand);
+		CliApp app = new CliApp(registry, helpCommand);
+		bridgeCommand.attach(app);
+
+		return app;
 	}
 
 	private static void writeJson(Json json) {

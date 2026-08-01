@@ -161,7 +161,11 @@ final class ControllerOperationRegistry {
 			}
 		});
 		registerWorkerProxy("app.key");
+		registerWorkerProxy("app.key.down");
+		registerWorkerProxy("app.key.up");
 		registerWorkerProxy("app.pointer.tap");
+		registerWorkerProxy("app.pointer.down");
+		registerWorkerProxy("app.pointer.up");
 		registerWorkerProxy("app.drag");
 		registerWorkerProxy("app.command.run");
 		registerWorkerProxy("app.list.select");
@@ -170,6 +174,9 @@ final class ControllerOperationRegistry {
 		registerWorkerProxy("app.gauge.set");
 		registerWorkerProxy("app.text-field.set");
 		registerWorkerProxy("app.text-box.set");
+		registerWorkerProxy("app.date-field.set");
+		registerWorkerProxy("app.pause");
+		registerWorkerProxy("app.resume");
 		registerWorkerProxy("app.screen.resize");
 		registerWorkerProxy("app.screen.rotate");
 		registerWorkerProxy("app.events.read");

@@ -3,6 +3,7 @@ package fixtures;
 import javax.microedition.lcdui.Choice;
 import javax.microedition.lcdui.ChoiceGroup;
 import javax.microedition.lcdui.Command;
+import javax.microedition.lcdui.DateField;
 import javax.microedition.lcdui.CommandListener;
 import javax.microedition.lcdui.Display;
 import javax.microedition.lcdui.Displayable;
@@ -30,6 +31,7 @@ public final class FormControlsFixtureMidlet extends MIDlet
 	private Gauge gauge;
 	private ChoiceGroup choice;
 	private TextField field;
+	private DateField when;
 
 	protected void startApp() {
 		if (form == null) {
@@ -41,10 +43,13 @@ public final class FormControlsFixtureMidlet extends MIDlet
 			choice.append("beta", null);
 			choice.append("gamma", null);
 			field = new TextField("Name", "abc", 32, 0);
+			when = new DateField("When", DateField.DATE_TIME);
+			when.setDate(new java.util.Date(0L));
 			form.append(status);
 			form.append(gauge);
 			form.append(choice);
 			form.append(field);
+			form.append(when);
 			form.addCommand(toListCommand);
 			form.setCommandListener(this);
 			form.setItemStateListener(this);
@@ -66,6 +71,8 @@ public final class FormControlsFixtureMidlet extends MIDlet
 			status.setText("choice=" + choice.getString(choice.getSelectedIndex()));
 		} else if (item == field) {
 			status.setText("field=" + field.getString());
+		} else if (item == when) {
+			status.setText("when=" + (when.getDate() == null ? "null" : String.valueOf(when.getDate().getTime())));
 		}
 	}
 

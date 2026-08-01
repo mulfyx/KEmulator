@@ -73,6 +73,16 @@ final class WorkerCommands {
 
 	static Json observe(
 		Displayable current, WorkerPermissions.PendingPermission permission, Vector<TargetedCommand> commands) {
+		javax.microedition.lcdui.Command leftSoft = AutomationStateExtractor.getLeftSoftCommand(current);
+		javax.microedition.lcdui.Command rightSoft = AutomationStateExtractor.getRightSoftCommand(current);
+		java.util.List<javax.microedition.lcdui.Command> menuCommands =
+			new java.util.ArrayList<javax.microedition.lcdui.Command>();
+		for (TargetedCommand menuCommand : AutomationStateExtractor.buildCommands(current)) {
+			if (menuCommand != null && menuCommand.command != null) {
+				menuCommands.add(menuCommand.command);
+			}
+		}
+
 		LinkedHashMap<Integer, TargetedCommand> nextRegistry = new LinkedHashMap<Integer, TargetedCommand>();
 		Json items = Json.array();
 		int id = 1;
@@ -104,6 +114,14 @@ final class WorkerCommands {
 				item.set("label", command.command.getLabel());
 				item.set("type", command.command.getCommandType());
 				item.set("priority", command.command.getPriority());
+				if (command.command == leftSoft) {
+					item.set("softkey", "left");
+				} else if (command.command == rightSoft) {
+					item.set("softkey", "right");
+					// Reachable only through the right softkey in the UI, but
+					// invokable by id through automation.
+					item.set("softkeyOnly", !menuCommands.contains(command.command));
+				}
 			}
 
 			items.add(item);
@@ -118,7 +136,10 @@ final class WorkerCommands {
 			public Object call() {
 				Display display = Emulator.getCurrentDisplay();
 				Displayable current = display == null ? null : display.getCurrent();
-				observe(current, WorkerPermissions.snapshot(), AutomationStateExtractor.buildCommands(current));
+					observe(
+					current,
+					WorkerPermissions.snapshot(),
+					AutomationStateExtractor.buildAutomationCommands(current));
 
 				return null;
 			}

@@ -60,6 +60,46 @@ final class WorkerOperationDispatcher {
 					System.nanoTime() - start));
 		}
 
+		if ("key-down".equals(op) || "key-up".equals(op)) {
+			long start = System.nanoTime();
+			String key = request.at("key") == null ? null : request.at("key").asString();
+			int code = WorkerInputActions.resolveKeyCode(key, request.at("code"));
+			boolean waitDispatched = request.at("waitDispatched", false).asBoolean();
+			Json delivery = "key-down".equals(op)
+				? WorkerInputActions.keyDown(code, waitDispatched)
+				: WorkerInputActions.keyUp(code, waitDispatched);
+			WorkerCommands.invalidate();
+
+			return Json.object()
+				.set("key", key)
+				.set("code", code)
+				.set("delivery", delivery)
+				.set("elapsedMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+					System.nanoTime() - start));
+		}
+
+		if ("pointer-down".equals(op) || "pointer-up".equals(op)) {
+			long start = System.nanoTime();
+			int x = request.at("x", -1).asInteger();
+			int y = request.at("y", -1).asInteger();
+			if (x < 0 || y < 0) {
+				throw new AutomationException(AutomationErrorCodes.INVALID_REQUEST, op + " requires x and y");
+			}
+
+			boolean waitDispatched = request.at("waitDispatched", false).asBoolean();
+			Json delivery = "pointer-down".equals(op)
+				? WorkerInputActions.pointerDown(x, y, waitDispatched)
+				: WorkerInputActions.pointerUp(x, y, waitDispatched);
+			WorkerCommands.invalidate();
+
+			return Json.object()
+				.set("x", x)
+				.set("y", y)
+				.set("delivery", delivery)
+				.set("elapsedMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+					System.nanoTime() - start));
+		}
+
 		if ("pointer-tap".equals(op)) {
 			long start = System.nanoTime();
 			int x = request.at("x", -1).asInteger();
@@ -143,6 +183,10 @@ final class WorkerOperationDispatcher {
 			return WorkerLcduiActions.textFieldSet(request);
 		}
 
+		if ("date-field-set".equals(op)) {
+			return WorkerLcduiActions.dateFieldSet(request);
+		}
+
 		if ("text-box-set".equals(op)) {
 			return WorkerLcduiActions.textBoxSet(request);
 		}
@@ -153,6 +197,14 @@ final class WorkerOperationDispatcher {
 
 		if ("screen-rotate".equals(op)) {
 			return WorkerScreenActions.rotate(request);
+		}
+
+		if ("pause".equals(op)) {
+			return WorkerAppLifecycle.pause(request);
+		}
+
+		if ("resume".equals(op)) {
+			return WorkerAppLifecycle.resume(request);
 		}
 
 		if ("permission".equals(op)) {

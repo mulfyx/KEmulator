@@ -155,6 +155,77 @@ final class WorkerInputActions {
 			.set("revision", WorkerEventModel.revision());
 	}
 
+	private static EventQueue requireQueue() {
+		EventQueue queue = Emulator.getEventQueue();
+		if (queue == null) {
+			throw new AutomationException(
+				AutomationErrorCodes.APP_INPUT_UNAVAILABLE, "Application input is not available.");
+		}
+
+		return queue;
+	}
+
+	/** Half of a key stroke: lets agents hold or chord keys. */
+	static Json keyDown(int code, boolean waitDispatched) {
+		EventQueue queue = requireQueue();
+		int sequence = queue.keyPressTracked(code);
+		if (waitDispatched) {
+			awaitDispatch(queue, sequence, 5000L, "press");
+		}
+
+		return Json.object()
+			.set("kind", classifyKey(code))
+			.set("phase", "down")
+			.set("pressSequence", sequence)
+			.set("dispatched", waitDispatched)
+			.set("revision", WorkerEventModel.revision());
+	}
+
+	static Json keyUp(int code, boolean waitDispatched) {
+		EventQueue queue = requireQueue();
+		int sequence = queue.keyReleaseTracked(code);
+		if (waitDispatched) {
+			awaitDispatch(queue, sequence, 5000L, "release");
+		}
+
+		return Json.object()
+			.set("kind", classifyKey(code))
+			.set("phase", "up")
+			.set("releaseSequence", sequence)
+			.set("dispatched", waitDispatched)
+			.set("revision", WorkerEventModel.revision());
+	}
+
+	static Json pointerDown(int x, int y, boolean waitDispatched) {
+		EventQueue queue = requireQueue();
+		int sequence = queue.mouseDownTracked(x, y, 0);
+		if (waitDispatched) {
+			awaitDispatch(queue, sequence, 5000L, "pointer-press");
+		}
+
+		return Json.object()
+			.set("kind", "pointer-event")
+			.set("phase", "down")
+			.set("pressSequence", sequence)
+			.set("dispatched", waitDispatched)
+			.set("revision", WorkerEventModel.revision());
+	}
+
+	static Json pointerUp(int x, int y, boolean waitDispatched) {
+		EventQueue queue = requireQueue();
+		int sequence = queue.mouseUpTracked(x, y, 0);
+		if (waitDispatched) {
+			awaitDispatch(queue, sequence, 5000L, "pointer-release");
+		}
+
+		return Json.object()
+			.set("kind", "pointer-event")
+			.set("phase", "up")
+			.set("releaseSequence", sequence)
+			.set("dispatched", waitDispatched)
+			.set("revision", WorkerEventModel.revision());
+	}
+
 	static Json tap(int x, int y, boolean waitDispatched) {
 		EventQueue queue = Emulator.getEventQueue();
 		if (queue == null) {

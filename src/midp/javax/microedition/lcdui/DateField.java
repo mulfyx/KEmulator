@@ -41,6 +41,7 @@ public class DateField extends Item {
 	public void setDate(final Date aDate348) {
 		this.date = aDate348;
 		repaintForm();
+		emulator.automation.worker.AutomationWorkerRuntime.onDisplayStateChanged("datefield-changed");
 	}
 
 	public int getInputMode() {
