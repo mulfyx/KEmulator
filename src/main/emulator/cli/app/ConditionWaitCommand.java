@@ -74,6 +74,12 @@ public final class ConditionWaitCommand implements CliCommand {
 				}
 				requireValue(invocation, i, json);
 				request.set("title", invocation.tokens().get(++i));
+			} else if ("display".equals(type) && "--title-regex".equals(token)) {
+				if (request.has("titleRegex")) {
+					throw CliParsing.duplicateOption(token, commandName(), json);
+				}
+				requireValue(invocation, i, json);
+				request.set("titleRegex", invocation.tokens().get(++i));
 			} else if ("display".equals(type) && "--selected-index".equals(token)) {
 				if (request.has("selectedIndex")) {
 					throw CliParsing.duplicateOption(token, commandName(), json);
@@ -106,6 +112,7 @@ public final class ConditionWaitCommand implements CliCommand {
 		if ("display".equals(type)
 			&& !request.has("kind")
 			&& !request.has("title")
+			&& !request.has("titleRegex")
 			&& !request.has("selectedIndex")
 			&& !request.has("afterRevision")) {
 			throw usage(json);

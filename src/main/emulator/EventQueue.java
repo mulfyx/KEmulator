@@ -226,6 +226,10 @@ public final class EventQueue implements Runnable {
 		}
 	}
 
+	public boolean isPaused() {
+		return paused;
+	}
+
 	public void sizeChanged(int x, int y) {
 		queue(Integer.MIN_VALUE | (x & 0xFFF) | (y & 0xFFF) << 12);
 	}
@@ -470,8 +474,9 @@ public final class EventQueue implements Runnable {
 						}
 						case EVENT_PAUSE: {
 							Displayable d = getCurrent();
-							if (!(d instanceof Canvas)) break;
-							((Canvas) d)._invokeHideNotify();
+							// The MIDlet lifecycle must pause regardless of the current
+							// displayable kind; hideNotify is Canvas-only.
+							if (d instanceof Canvas) ((Canvas) d)._invokeHideNotify();
 							this.paused = true;
 							if (AppSettings.startAppOnResume) {
 								try {

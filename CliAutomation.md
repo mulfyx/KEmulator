@@ -95,6 +95,7 @@ address the failed worker until the next `open` or an explicit `close`.
 ## Commands
 
 - `help [command...]`
+- `bridge`
 - `start [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH]`
 - `status`
 - `stop [--force]`
@@ -109,10 +110,10 @@ address the failed worker until the next `open` or an explicit `close`.
 - `rms reset`
 - `rms export FILE`
 - `rms import FILE`
-- `observe`
+- `observe [--screenshot FILE]`
 - `events read [--since CURSOR] [--jsonl]`
 - `screenshot FILE`
-- `wait display [--kind KIND] [--title TITLE] [--selected-index N] [--after-revision REV] [--timeout MS]`
+- `wait display [--kind KIND] [--title TITLE] [--title-regex REGEX] [--selected-index N] [--after-revision REV] [--timeout MS]`
 - `wait worker-ready [--timeout MS]`
 - `wait worker-exit [--timeout MS]`
 - `wait idle [--timeout MS]`
@@ -121,7 +122,11 @@ address the failed worker until the next `open` or an explicit `close`.
 - `wait log --regex REGEX [--since CURSOR] [--timeout MS]`
 - `key press <key> [--duration MS] [--wait-dispatched]`
 - `key hold <key> [--duration MS] [--wait-dispatched] [--wait-release]`
+- `key down <key> [--wait-dispatched]`
+- `key up <key> [--wait-dispatched]`
 - `pointer tap <x> <y> [--wait-dispatched]`
+- `pointer down <x> <y> [--wait-dispatched]`
+- `pointer up <x> <y> [--wait-dispatched]`
 - `drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS]`
 - `list select INDEX [--expect-revision REV] [--timeout MS]`
 - `list move <up|down> [--count N] [--expect-revision REV] [--timeout MS]`
@@ -129,6 +134,9 @@ address the failed worker until the next `open` or an explicit `close`.
 - `gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
 - `text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
 - `text-box set TEXT [--expect-revision REV] [--timeout MS]`
+- `date-field set EPOCH_MS [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
+- `pause [--expect-revision REV] [--timeout MS]`
+- `resume [--expect-revision REV] [--timeout MS]`
 - `resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS]`
 - `rotate [--expect-revision REV] [--wait-frame] [--timeout MS]`
 - `command run <--id ID|--label LABEL> [--expect-revision REV] [--wait-next-display] [--timeout MS]`
@@ -156,6 +164,25 @@ Runtime names are launcher-dependent. A packaged bundle normally advertises
 `release`; a repository checkout may advertise values such as `dev-linux` and
 `release`. Query the active launcher with `help start` or `help open` and pass
 one of the advertised values.
+
+## Bridge Mode (JSONL)
+
+`kemu bridge` serves many commands from one long-lived CLI process, removing
+the per-command JVM startup cost. Each stdin line is a request; each stdout
+line is the normal JSON envelope plus the echoed `id`:
+
+```text
+> {"id": 1, "argv": ["open", "./app.jar", "--headless", "--wait-ready"]}
+< {"id": 1, "ok": true, "command": "open", "result": {...}}
+```
+
+- `argv` is an array of plain argument strings: no shell quoting rules.
+- The session id is fixed per bridge process (`--session-id` inside a
+  request is rejected); `--json` is implied; `bridge` cannot be nested.
+- Malformed request lines produce an error envelope with `"id": null`.
+- Responses are written in request order; EOF on stdin terminates the
+  bridge with exit code `0`. Per-command process exit codes do not exist in
+  bridge mode; branch on `ok` and `error.code`.
 
 ## JSON Contract
 
@@ -315,7 +342,10 @@ already occurred.
 application reuses one `Displayable` object but replaces its title or contents.
 
 Command entries in `result.state.displayable.commands` can include `id`, `text`,
-`choice`, `selected`, `label`, `type`, and `priority`. Every invocation requires
+`choice`, `selected`, `label`, `type`, and `priority`. Commands bound to a
+softkey also carry `softkey: "left"|"right"`; `softkeyOnly: true` marks the
+BACK/EXIT-style commands that the on-screen menu omits — they are still
+invokable by id, no key press needed. Every invocation requires
 the observation revision. After any UI-changing action, call `observe --json`
 again. On `STALE_REVISION` or `UNKNOWN_COMMAND_ID`, re-observe and reselect the
 command by stable fields such as `label`, `text`, `type`, or `priority`.
@@ -347,6 +377,12 @@ request disappears while an agent is deciding, call `observe --json` and
 continue from the new state.
 
 ## Input
+
+`key press` and `pointer tap` deliver a full stroke. For chords and holds use
+the half-stroke forms: `key down`/`key up` keep a key held (several keys can
+be held at once), and `pointer down`/`pointer up` keep the pointer pressed
+between coordinates. Every held key or pointer is released when the worker
+exits, not automatically between commands.
 
 Useful key names:
 
@@ -380,6 +416,16 @@ Limits and defaults:
 For Canvas games, numeric keypad input is often more reliable than directional
 aliases because many J2ME games document movement as `1` through `9`.
 
+## MIDlet Lifecycle
+
+`pause` and `resume` drive the MIDP lifecycle the way a handset interruption
+does: `pause` delivers `hideNotify` to a Canvas, sets the paused flag, and
+calls `pauseApp()`; `resume` calls `startApp()` again and delivers
+`showNotify`. Both acknowledge only after the worker reports the new state
+and return the uniform mutation shape plus `paused`. While paused, the LCDUI
+event queue is idle: `observe` still works, but LCDUI mutations time out
+until `resume`.
+
 ## Screenshots And Canvas Text
 
 The CLI can expose structured text for LCDUI widgets such as `List` and
@@ -398,6 +444,10 @@ of the file extension. Parent directories are created automatically. The JSON
 response returns metadata such as `app`, nested `state`, `saved: true`, and
 `path`; it does not embed screenshot bytes. File creation and write failures
 return `SCREENSHOT_WRITE_FAILED`.
+
+`observe --screenshot FILE` captures the state and the image in one worker
+call, so the snapshot and the picture cannot drift apart; the response adds
+`screenshot: {saved, path}`.
 
 Use unique screenshot paths for each observation step so an agent does not read
 stale image files. Treat `state.width` and `state.height` from `observe` as the coordinate

@@ -39,6 +39,7 @@ public final class KeyActionCommand implements CliCommand {
 		if (invocation.tokens().size() < 3) {
 			throw usage(json);
 		}
+		boolean halfStroke = "down".equals(action) || "up".equals(action);
 		String key = invocation.tokens().get(2);
 		int durationMs = "hold".equals(action)
 			? AutomationLimits.DEFAULT_KEY_HOLD_DURATION_MS
@@ -48,7 +49,7 @@ public final class KeyActionCommand implements CliCommand {
 		boolean waitRelease = false;
 		for (int i = 3; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
-			if ("--duration".equals(token)) {
+			if ("--duration".equals(token) && !halfStroke) {
 				if (sawDuration) {
 					throw CliParsing.duplicateOption(token, "key " + action, json);
 				}
@@ -84,16 +85,23 @@ public final class KeyActionCommand implements CliCommand {
 		}
 		Json request = Json.object()
 			.set("key", key)
-			.set("durationMs", durationMs)
-			.set("waitDispatched", waitDispatched)
-			.set("waitRelease", waitRelease);
+			.set("waitDispatched", waitDispatched);
+		if (!halfStroke) {
+			request.set("durationMs", durationMs);
+			request.set("waitRelease", waitRelease);
+		}
+
+		String operation = halfStroke ? "app.key." + action : "app.key";
 		ControllerStatus status = ControllerLifecycle.requireRunningController("key " + action, json);
 		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
 			ControllerStatusService.controllerClient(status),
-			"app.key",
+			operation,
 			request,
 			"key " + action,
 			json));
-		return new CommandResult("key " + action, "Pressed " + key + ".", payload, json);
+		String text = halfStroke
+			? ("down".equals(action) ? "Key down: " : "Key up: ") + key + "."
+			: "Pressed " + key + ".";
+		return new CommandResult("key " + action, text, payload, json);
 	}
 }

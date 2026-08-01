@@ -123,7 +123,8 @@ def test_form_choice_gauge_text_field(kemu, fixtures):
     displayable = kemu.state_of(observation)["displayable"]
     assert displayable["kind"] == "form"
     kinds = [item["kind"] for item in displayable["items"]]
-    assert kinds == ["string-item", "gauge", "choice-group", "text-field"]
+    assert kinds == [
+        "string-item", "gauge", "choice-group", "text-field", "date-field"]
 
     result = kemu.ok("gauge", "set", "7",
                      "--expect-revision", str(kemu.revision(observation)))

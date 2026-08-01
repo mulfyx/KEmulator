@@ -77,10 +77,10 @@ public final class CliTextRenderer {
 	}
 
 	private static final String[] ROOT_TOPICS = {
-		"help", "start", "status", "stop", "logs", "inspect", "open", "close",
+		"help", "bridge", "start", "status", "stop", "logs", "inspect", "open", "close",
 		"state", "rms", "observe", "events", "screenshot", "wait", "key",
 		"pointer", "drag", "list", "choice", "gauge", "text-field", "text-box",
-		"resize", "rotate", "command run", "permission",
+		"resize", "rotate", "pause", "resume", "date-field", "command run", "permission",
 	};
 
 	public static String usageText() {
@@ -103,6 +103,8 @@ public final class CliTextRenderer {
 	private static String usageLine(String topic) {
 		if ("help".equals(topic))
 			return "kemu help [command...] [--json]";
+		if ("bridge".equals(topic))
+			return "kemu bridge  (JSONL: one {\"id\", \"argv\": [...]} request per stdin line)";
 		if ("start".equals(topic))
 			return "kemu start [--headless|--visible] [--runtime " + runtimeUsageChoices() + "] [--size WxH] [--json]";
 		if ("status".equals(topic))
@@ -132,21 +134,21 @@ public final class CliTextRenderer {
 			return "kemu rms reset [--json]\n"
 				+ "       kemu rms <export|import> FILE [--json]";
 		if ("observe".equals(topic))
-			return "kemu observe [--json]";
+			return "kemu observe [--screenshot FILE] [--json]";
 		if ("events".equals(topic))
 			return "kemu events read [--since CURSOR] [--jsonl] [--json]";
 		if ("screenshot".equals(topic))
 			return "kemu screenshot FILE [--json]";
 		if ("wait".equals(topic))
-			return "kemu wait display [--kind KIND] [--title TITLE] [--selected-index N]"
-				+ " [--after-revision REV] [--timeout MS] [--json]\n"
+			return "kemu wait display [--kind KIND] [--title TITLE] [--title-regex REGEX]"
+				+ " [--selected-index N] [--after-revision REV] [--timeout MS] [--json]\n"
 				+ "       kemu wait <worker-ready|worker-exit|idle> [--timeout MS] [--json]\n"
 				+ "       kemu wait frame --after-revision REV [--timeout MS] [--json]\n"
 				+ "       kemu wait permission [--name NAME] [--timeout MS] [--json]\n"
 				+ "       kemu wait log --regex REGEX [--since CURSOR] [--timeout MS] [--json]";
 		if ("wait display".equals(topic))
-			return "kemu wait display [--kind KIND] [--title TITLE] [--selected-index N]"
-				+ " [--after-revision REV] [--timeout MS] [--json]";
+			return "kemu wait display [--kind KIND] [--title TITLE] [--title-regex REGEX]"
+				+ " [--selected-index N] [--after-revision REV] [--timeout MS] [--json]";
 		if ("wait worker-ready".equals(topic)
 			|| "wait worker-exit".equals(topic)
 			|| "wait idle".equals(topic))
@@ -159,13 +161,19 @@ public final class CliTextRenderer {
 			return "kemu wait permission [--name NAME] [--timeout MS] [--json]";
 		if ("key".equals(topic))
 			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]\n"
-				+ "       kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]";
+				+ "       kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]\n"
+				+ "       kemu key <down|up> <key> [--wait-dispatched] [--json]";
+		if ("key down".equals(topic) || "key up".equals(topic))
+			return "kemu " + topic + " <key> [--wait-dispatched] [--json]";
 		if ("key press".equals(topic))
 			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]";
 		if ("key hold".equals(topic))
 			return "kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]";
-		if ("pointer".equals(topic) || "pointer tap".equals(topic))
-			return "kemu pointer tap <x> <y> [--wait-dispatched] [--json]";
+		if ("pointer".equals(topic))
+			return "kemu pointer tap <x> <y> [--wait-dispatched] [--json]\n"
+				+ "       kemu pointer <down|up> <x> <y> [--wait-dispatched] [--json]";
+		if ("pointer tap".equals(topic) || "pointer down".equals(topic) || "pointer up".equals(topic))
+			return "kemu " + topic + " <x> <y> [--wait-dispatched] [--json]";
 		if ("drag".equals(topic))
 			return "kemu drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS] [--json]";
 		if ("list".equals(topic))
@@ -183,6 +191,11 @@ public final class CliTextRenderer {
 			return "kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("text-box".equals(topic) || "text-box set".equals(topic))
 			return "kemu text-box set TEXT [--expect-revision REV] [--timeout MS] [--json]";
+		if ("date-field".equals(topic) || "date-field set".equals(topic))
+			return "kemu date-field set EPOCH_MS [--item-index INDEX] [--expect-revision REV]"
+				+ " [--timeout MS] [--json]";
+		if ("pause".equals(topic) || "resume".equals(topic))
+			return "kemu " + topic + " [--expect-revision REV] [--timeout MS] [--json]";
 		if ("resize".equals(topic))
 			return "kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
 		if ("rotate".equals(topic))

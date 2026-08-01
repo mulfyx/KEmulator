@@ -71,13 +71,17 @@ def test_mutation_results_share_one_shape(kemu, fixtures):
 
 
 def test_exit_code_is_function_of_error_code(kemu, fixtures, workdir):
-    assert kemu.err("nope", code="UNKNOWN_COMMAND").exit_code == 2
+    # Exit codes exist only for one-shot invocations; the bridge streams
+    # envelopes without per-command process exits.
+    assert kemu.err("nope", code="UNKNOWN_COMMAND", oneshot=True).exit_code == 2
     assert kemu.err("inspect", str(workdir / "gone.jar"),
-                    code="PATH_NOT_FOUND").exit_code == 3
-    assert kemu.err("logs", "cursor", code="NO_ACTIVE_APP").exit_code == 4
+                    code="PATH_NOT_FOUND", oneshot=True).exit_code == 3
+    assert kemu.err("logs", "cursor", code="NO_ACTIVE_APP",
+                    oneshot=True).exit_code == 4
 
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    outcome = kemu.err("gauge", "set", "1", code="LCDUI_CONTROL_UNAVAILABLE")
+    outcome = kemu.err("gauge", "set", "1", code="LCDUI_CONTROL_UNAVAILABLE",
+                       oneshot=True)
     assert outcome.exit_code == 2  # rebuild-the-request class
 
 

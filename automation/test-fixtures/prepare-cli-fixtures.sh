@@ -125,6 +125,8 @@ props_manifest_jar = descriptor_dir / "props-manifest.jar"
 startup_permission_jar = descriptor_dir / "startup-permission.jar"
 file_probe_jar = descriptor_dir / "file-probe.jar"
 form_controls_jar = descriptor_dir / "form-controls.jar"
+lifecycle_jar = descriptor_dir / "lifecycle.jar"
+input_probe_jar = descriptor_dir / "input-probe.jar"
 rms_counter_jar = descriptor_dir / "rms-counter.jar"
 mega_space_jar = descriptor_dir / "mega space.jar"
 mega_parent_jar = parent_jars_dir / "mega-parent.jar"
@@ -278,6 +280,32 @@ with_manifest(
         "Manifest-Version: 1.0",
         "MIDlet-1: Form Controls Fixture,,fixtures.FormControlsFixtureMidlet",
         "MIDlet-Name: Form Controls Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+with_manifest(
+    fixture_jar,
+    lifecycle_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: Lifecycle Fixture,,fixtures.LifecycleFixtureMidlet",
+        "MIDlet-Name: Lifecycle Fixture",
+        "MIDlet-Vendor: KEmulator",
+        "MIDlet-Version: 1.0.0",
+        "MicroEdition-Configuration: CLDC-1.1",
+        "MicroEdition-Profile: MIDP-2.0",
+    ],
+)
+with_manifest(
+    fixture_jar,
+    input_probe_jar,
+    [
+        "Manifest-Version: 1.0",
+        "MIDlet-1: Input Probe Fixture,,fixtures.InputProbeFixtureMidlet",
+        "MIDlet-Name: Input Probe Fixture",
         "MIDlet-Vendor: KEmulator",
         "MIDlet-Version: 1.0.0",
         "MicroEdition-Configuration: CLDC-1.1",
@@ -459,6 +487,8 @@ write_env_var "$ENV_FILE" "STARTUP_PERMISSION_JAR" "$DESCRIPTOR_DIR/startup-perm
 write_env_var "$ENV_FILE" "FILE_PROBE_JAR" "$DESCRIPTOR_DIR/file-probe.jar"
 write_env_var "$ENV_FILE" "FORM_CONTROLS_JAR" "$DESCRIPTOR_DIR/form-controls.jar"
 write_env_var "$ENV_FILE" "RMS_COUNTER_JAR" "$DESCRIPTOR_DIR/rms-counter.jar"
+write_env_var "$ENV_FILE" "LIFECYCLE_JAR" "$DESCRIPTOR_DIR/lifecycle.jar"
+write_env_var "$ENV_FILE" "INPUT_PROBE_JAR" "$DESCRIPTOR_DIR/input-probe.jar"
 write_env_var "$ENV_FILE" "PROBE_MEMORYCARD_JAD" "$DESCRIPTOR_DIR/probe-memorycard.jad"
 write_env_var "$ENV_FILE" "PROBE_DRIVE_E_JAD" "$DESCRIPTOR_DIR/probe-drive-e.jad"
 write_env_var "$ENV_FILE" "PLAIN_TEXT_JAR" "$INVALID_DIR/plain-text.jar"

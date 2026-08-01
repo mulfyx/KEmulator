@@ -6,6 +6,7 @@ import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
 import java.util.concurrent.TimeUnit;
 import javax.microedition.lcdui.ChoiceGroup;
+import javax.microedition.lcdui.DateField;
 import javax.microedition.lcdui.Display;
 import javax.microedition.lcdui.Displayable;
 import javax.microedition.lcdui.Form;
@@ -318,6 +319,33 @@ final class WorkerLcduiActions {
 					.set("caret", textField.getCaretPosition())
 					.set("constraints", textField.getConstraints())
 					.set("maxSize", textField.getMaxSize());
+			}
+		});
+	}
+
+	static Json dateFieldSet(final Json request) {
+		return mutate(request, new Action() {
+			public Json run() {
+				Form form = requireForm();
+				DateField dateField = (DateField) findItem(
+					form,
+					request.at("itemIndex", -1).asInteger(),
+					DateField.class);
+				if (!request.has("value") || request.at("value").isNull()) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"date-field-set requires value (epoch milliseconds)");
+				}
+				long epochMs = request.at("value").asLong();
+				long oldRevision = WorkerEventModel.revision();
+				dateField.setDate(new java.util.Date(epochMs));
+				form._itemStateChanged(dateField);
+				java.util.Date current = dateField.getDate();
+				return Json.object()
+					.set("oldRevision", oldRevision)
+					.set("newRevision", WorkerEventModel.revision())
+					.set("date", current == null ? null : Long.valueOf(current.getTime()))
+					.set("inputMode", dateField.getInputMode());
 			}
 		});
 	}
