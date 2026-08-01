@@ -1,5 +1,7 @@
 package emulator.cli.app;
 
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
 import emulator.cli.output.CliResponses;
@@ -17,58 +19,15 @@ public final class ScreenshotCommand implements CliCommand {
 	}
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
-		Path out = null;
-		boolean sawOut = false;
-		for (int i = 1; i < invocation.tokens().size(); i++) {
-			String token = invocation.tokens().get(i);
-			if ("--out".equals(token)) {
-				if (sawOut) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						"Duplicate option: --out.",
-						CliExitCodes.USAGE,
-						"screenshot",
-						invocation.json());
-				}
-
-				if (i + 1 >= invocation.tokens().size()) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("screenshot"),
-						CliExitCodes.USAGE,
-						"screenshot",
-						invocation.json());
-				}
-
-				sawOut = true;
-				out = CliParsing.resolveUserPath(invocation.tokens().get(++i));
-			} else {
-				throw new KemuCliException(
-					"USAGE_ERROR",
-					CliTextRenderer.usageText("screenshot"),
-					CliExitCodes.USAGE,
-					"screenshot",
-					invocation.json());
-			}
-		}
-
-		if (out == null) {
+		if (invocation.tokens().size() != 2) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
+				CliErrorCodes.USAGE_ERROR,
 				CliTextRenderer.usageText("screenshot"),
-				CliExitCodes.USAGE,
 				"screenshot",
 				invocation.json());
 		}
 
-		if (!out.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
-			throw new KemuCliException(
-				"USAGE_ERROR",
-				"Screenshot output must use .png extension: " + out,
-				CliExitCodes.USAGE,
-				"screenshot",
-				invocation.json());
-		}
+		Path out = CliParsing.resolveUserPath(invocation.tokens().get(1));
 
 		ControllerStatus status = ControllerLifecycle.requireRunningController("screenshot", invocation.json());
 		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
@@ -82,9 +41,8 @@ public final class ScreenshotCommand implements CliCommand {
 			: payload.at("imageBase64").asString();
 		if (imageBase64 == null || imageBase64.length() == 0) {
 			throw new KemuCliException(
-				"SCREENSHOT_FAILED",
+				AutomationErrorCodes.SCREENSHOT_FAILED,
 				"Controller did not return image data.",
-				CliExitCodes.RUNTIME,
 				"screenshot",
 				invocation.json());
 		}
@@ -94,9 +52,8 @@ public final class ScreenshotCommand implements CliCommand {
 			imageBytes = Base64.getDecoder().decode(imageBase64);
 		} catch (IllegalArgumentException e) {
 			throw new KemuCliException(
-				"SCREENSHOT_FAILED",
+				AutomationErrorCodes.SCREENSHOT_FAILED,
 				"Controller returned invalid image data.",
-				CliExitCodes.RUNTIME,
 				"screenshot",
 				invocation.json());
 		}
@@ -110,9 +67,8 @@ public final class ScreenshotCommand implements CliCommand {
 			Files.write(out, imageBytes);
 		} catch (IOException e) {
 			throw new KemuCliException(
-				"SCREENSHOT_WRITE_FAILED",
+				CliErrorCodes.SCREENSHOT_WRITE_FAILED,
 				"Could not write screenshot to " + out + ": " + e.getMessage(),
-				CliExitCodes.RUNTIME,
 				"screenshot",
 				invocation.json(),
 				Json.object().set("path", out.toString()));

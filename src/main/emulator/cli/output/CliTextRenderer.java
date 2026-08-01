@@ -76,53 +76,28 @@ public final class CliTextRenderer {
 		return "dev-linux|release";
 	}
 
-	public static String usageText() {
-		String runtimeUsage = runtimeUsageChoices();
+	private static final String[] ROOT_TOPICS = {
+		"help", "start", "status", "stop", "logs", "inspect", "open", "close",
+		"state", "rms", "observe", "events", "screenshot", "wait", "key",
+		"pointer", "drag", "list", "choice", "gauge", "text-field", "text-box",
+		"resize", "rotate", "command run", "permission",
+	};
 
-		return "Usage:\n"
-			+ "  kemu help [command...] [--json]\n"
-			+ "  kemu start [--headless|--visible] [--runtime " + runtimeUsage + "] [--size WxH] [--json]\n"
-			+ "  kemu status [--json]\n"
-			+ "  kemu stop [--force] [--json]\n"
-			+ "  kemu logs cursor [--json]\n"
-			+ "  kemu logs read [--since CURSOR] [--jsonl] [--json]\n"
-			+ "  kemu inspect <path> [--json]\n"
-			+ "  kemu open <path> [--data-dir DIR] [--rms-dir DIR] [--file-root DIR]"
-			+ " [--reset-state] [--reset-file-root] [--worker-xmx SIZE]"
-			+ " [--wait-ready] [--open-timeout MS]"
-			+ " [--headless|--visible] [--runtime " + runtimeUsage + "] [--size WxH] [--json]\n"
-			+ "  kemu close [--json]\n"
-			+ "  kemu state [--json]\n"
-			+ "  kemu state <snapshot|restore> FILE [--json]\n"
-			+ "  kemu rms <reset|export|import> [FILE] [--json]\n"
-			+ "  kemu observe [--json]\n"
-			+ "  kemu events read [--since CURSOR] [--jsonl] [--json]\n"
-			+ "  kemu screenshot --out FILE [--json]\n"
-			+ "  kemu wait display [--kind KIND] [--title TITLE] [--selected-index N]"
-			+ " [--after-revision REV] [--timeout MS] [--json]\n"
-			+ "  kemu wait <worker-ready|worker-exit|idle> [--timeout MS] [--json]\n"
-			+ "  kemu wait frame --after-revision REV [--timeout MS] [--json]\n"
-			+ "  kemu wait permission [--name NAME] [--timeout MS] [--json]\n"
-			+ "  kemu wait log --regex REGEX [--since CURSOR] [--timeout MS] [--json]\n"
-			+ "  kemu key press <key> [--wait-dispatched] [--json]\n"
-			+ "  kemu key hold <key> [--duration MS] [--wait-release] [--json]\n"
-			+ "  kemu pointer tap <x> <y> [--wait-dispatched] [--json]\n"
-			+ "  kemu drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS] [--json]\n"
-			+ "  kemu list <select N|move up|move down> [--expect-revision REV] [--json]\n"
-			+ "  kemu choice set N [--item-index INDEX] [--expect-revision REV] [--json]\n"
-			+ "  kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--json]\n"
-			+ "  kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--json]\n"
-			+ "  kemu text-box set TEXT [--expect-revision REV] [--json]\n"
-			+ "  kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]\n"
-			+ "  kemu rotate [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]\n"
-			+ "  kemu command run <--id ID|--label LABEL> --expect-revision REV"
-			+ " [--wait-next-display] [--timeout MS] [--json]\n"
-			+ "  kemu permission <allow [--once|--always]|deny> [id] [--json]\n"
-			+ "\n"
-			+ "Notes:\n"
-			+ "  CLI automation contract is currently Linux-only.\n"
-			+ "  Use `kemu <command> --help` or `kemu help <command...>` for command-specific usage.\n"
-			+ "  Path-first workflow is canonical: inspect/open <path>.\n";
+	public static String usageText() {
+		StringBuilder out = new StringBuilder("Usage:\n");
+		for (String topic : ROOT_TOPICS) {
+			for (String line : usageLine(topic).split("\n")) {
+				out.append("  kemu ").append(line.replaceFirst("^\\s*kemu ", "")).append('\n');
+			}
+		}
+
+		out.append('\n')
+			.append("Notes:\n")
+			.append("  CLI automation contract is currently Linux-only.\n")
+			.append("  Use `kemu <command> --help` or `kemu help <command...>` for command-specific usage.\n")
+			.append("  Path-first workflow is canonical: inspect/open <path>.\n");
+
+		return out.toString();
 	}
 
 	private static String usageLine(String topic) {
@@ -161,7 +136,7 @@ public final class CliTextRenderer {
 		if ("events".equals(topic))
 			return "kemu events read [--since CURSOR] [--jsonl] [--json]";
 		if ("screenshot".equals(topic))
-			return "kemu screenshot --out FILE [--json]";
+			return "kemu screenshot FILE [--json]";
 		if ("wait".equals(topic))
 			return "kemu wait display [--kind KIND] [--title TITLE] [--selected-index N]"
 				+ " [--after-revision REV] [--timeout MS] [--json]\n"
@@ -183,40 +158,40 @@ public final class CliTextRenderer {
 		if ("wait permission".equals(topic))
 			return "kemu wait permission [--name NAME] [--timeout MS] [--json]";
 		if ("key".equals(topic))
-			return "kemu key press <key> [--wait-dispatched] [--json]\n"
-				+ "       kemu key hold <key> [--duration MS] [--wait-release] [--json]";
+			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]\n"
+				+ "       kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]";
 		if ("key press".equals(topic))
-			return "kemu key press <key> [--wait-dispatched] [--json]";
+			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]";
 		if ("key hold".equals(topic))
-			return "kemu key hold <key> [--duration MS] [--wait-release] [--json]";
+			return "kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]";
 		if ("pointer".equals(topic) || "pointer tap".equals(topic))
 			return "kemu pointer tap <x> <y> [--wait-dispatched] [--json]";
 		if ("drag".equals(topic))
 			return "kemu drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS] [--json]";
 		if ("list".equals(topic))
-			return "kemu list select INDEX [--expect-revision REV] [--json]\n"
-				+ "       kemu list move <up|down> [--count N] [--expect-revision REV] [--json]";
+			return "kemu list select INDEX [--expect-revision REV] [--timeout MS] [--json]\n"
+				+ "       kemu list move <up|down> [--count N] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("list select".equals(topic))
-			return "kemu list select INDEX [--expect-revision REV] [--json]";
+			return "kemu list select INDEX [--expect-revision REV] [--timeout MS] [--json]";
 		if ("list move".equals(topic))
-			return "kemu list move <up|down> [--count N] [--expect-revision REV] [--json]";
+			return "kemu list move <up|down> [--count N] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("choice".equals(topic) || "choice set".equals(topic))
-			return "kemu choice set INDEX [--item-index INDEX] [--expect-revision REV] [--json]";
+			return "kemu choice set INDEX [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("gauge".equals(topic) || "gauge set".equals(topic))
-			return "kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--json]";
+			return "kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("text-field".equals(topic) || "text-field set".equals(topic))
-			return "kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--json]";
+			return "kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
 		if ("text-box".equals(topic) || "text-box set".equals(topic))
-			return "kemu text-box set TEXT [--expect-revision REV] [--json]";
+			return "kemu text-box set TEXT [--expect-revision REV] [--timeout MS] [--json]";
 		if ("resize".equals(topic))
 			return "kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
 		if ("rotate".equals(topic))
 			return "kemu rotate [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
 		if ("command".equals(topic))
-			return "kemu command run <--id ID|--label LABEL> --expect-revision REV"
+			return "kemu command run <--id ID|--label LABEL> [--expect-revision REV]"
 				+ " [--wait-next-display] [--timeout MS] [--json]";
 		if ("command run".equals(topic))
-			return "kemu command run <--id ID|--label LABEL> --expect-revision REV"
+			return "kemu command run <--id ID|--label LABEL> [--expect-revision REV]"
 				+ " [--wait-next-display] [--timeout MS] [--json]";
 		if ("permission".equals(topic))
 			return "kemu permission <allow [--once|--always]|deny> [id] [--json]";
@@ -377,13 +352,14 @@ public final class CliTextRenderer {
 			out.append("Status: ").append(payload.at("status").asString()).append('\n');
 		}
 
-		out.append("Ready: ").append(payload.at("ready", false).asBoolean()).append('\n');
-		Json displayable = payload.at("displayable");
+		Json state = payload.at("state", Json.nil());
+		out.append("Ready: ")
+			.append(!state.isNull() && state.at("ready", false).asBoolean())
+			.append('\n');
+		Json displayable = state.isNull() ? Json.nil() : state.at("displayable", Json.nil());
 		out.append("Title: ")
 			.append(
-				displayable == null
-					|| displayable.isNull()
-					|| displayable.at("title", Json.nil()).isNull()
+				displayable.isNull() || displayable.at("title", Json.nil()).isNull()
 					? ""
 					: displayable.at("title").asString())
 			.append('\n');
@@ -391,13 +367,14 @@ public final class CliTextRenderer {
 		return trimTrailingNewline(out);
 	}
 
-	public static String renderState(Json payload) {
-		if (!payload.at("active", false).asBoolean()) {
+	public static String renderState(Json wrapper) {
+		if (!wrapper.at("active", false).asBoolean()) {
 			return "No active app.";
 		}
 
+		Json payload = wrapper.at("state", Json.object());
 		StringBuilder out = new StringBuilder();
-		Json app = payload.at("app");
+		Json app = wrapper.at("app");
 		if (app != null && app.isObject()) {
 			out.append("App: ")
 				.append(
@@ -436,11 +413,12 @@ public final class CliTextRenderer {
 		return trimTrailingNewline(out);
 	}
 
-	public static String renderObserve(Json payload) {
-		if (payload.has("active") && !payload.at("active", false).asBoolean()) {
+	public static String renderObserve(Json wrapper) {
+		if (wrapper.has("active") && !wrapper.at("active", false).asBoolean()) {
 			return "No active app.";
 		}
 
+		Json payload = wrapper.at("state", Json.object());
 		StringBuilder out = new StringBuilder();
 		out.append("Ready: ").append(payload.at("ready", false).asBoolean()).append('\n');
 		out.append("Midlet started: ")

@@ -28,6 +28,16 @@ public final class CommandRegistry {
 		return best;
 	}
 
+	public List<String> commandPaths() {
+		List<String> paths = new ArrayList<String>();
+		for (CliCommand command : commands) {
+			paths.add(command.path().asString());
+		}
+		java.util.Collections.sort(paths);
+
+		return paths;
+	}
+
 	public CliCommand resolveExact(List<String> tokens) {
 		CliCommand command = resolve(tokens);
 		if (command == null) {

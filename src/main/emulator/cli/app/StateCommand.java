@@ -21,7 +21,7 @@ public final class StateCommand implements CliCommand {
 			? CliResponses.normalizePublicJson(ControllerCalls.callController(
 				client, "app.session", Json.object(), "state", invocation.json()))
 			: Json.object();
-		Json payload = CliResponses.buildStatePayload(current, session);
+		Json payload = CliResponses.buildSnapshotPayload(current, session.at("state", Json.object()));
 
 		return new CommandResult("state", CliTextRenderer.renderState(payload), payload, invocation.json());
 	}

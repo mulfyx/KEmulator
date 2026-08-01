@@ -184,7 +184,7 @@ final class WorkerSessionSnapshot {
 				Display display = Emulator.getCurrentDisplay();
 				Displayable current = display == null ? null : display.getCurrent();
 
-				result.set("schemaVersion", 3);
+				result.set("schemaVersion", emulator.automation.shared.AutomationSchemas.SNAPSHOT_VERSION);
 				result.set("revision", WorkerEventModel.revision());
 				result.set("frameRevision", WorkerEventModel.frameRevision());
 				result.set("eventCursor", WorkerEventModel.cursor());

@@ -36,18 +36,13 @@ final class WorkerLcduiActions {
 		}).intValue();
 	}
 
-	private static void checkRevision(Json request) {
-		if (!request.has("expectRevision") || request.at("expectRevision").isNull()) {
-			return;
-		}
-		long expected = request.at("expectRevision").asLong();
-		long current = WorkerEventModel.revision();
-		if (expected != current) {
-			throw new AutomationException(
-				AutomationErrorCodes.STALE_REVISION,
-				"Stale revision: " + expected + ", current: " + current,
-				Json.object().set("expectedRevision", expected).set("currentRevision", current));
-		}
+	/** Uniform mutation result: oldRevision/newRevision + elapsedMs + state. */
+	private static Json mutate(Json request, Action action) {
+		long start = System.nanoTime();
+		Json result = onEventThread(request, action);
+		result.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+		result.set("state", WorkerSessionSnapshot.build(false));
+		return result;
 	}
 
 	private static Json onEventThread(final Json request, final Action action) {
@@ -61,7 +56,7 @@ final class WorkerLcduiActions {
 		try {
 			boolean completed = queue.callAndWait(new Runnable() {
 				public void run() {
-					checkRevision(request);
+					RevisionGuard.check(request);
 					result[0] = action.run();
 				}
 			}, request.at("timeoutMs", 5000L).asLong());
@@ -71,7 +66,7 @@ final class WorkerLcduiActions {
 					"Timed out waiting for the LCDUI event thread",
 					Json.object()
 						.set("timeoutMs", request.at("timeoutMs", 5000L).asLong())
-						.set("lastRevision", WorkerEventModel.revision()));
+						.set("currentRevision", WorkerEventModel.revision()));
 			}
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
@@ -125,7 +120,7 @@ final class WorkerLcduiActions {
 	}
 
 	static Json listSelect(final Json request) {
-		return onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Displayable current = currentDisplayable();
 				if (!(current instanceof javax.microedition.lcdui.List)) {
@@ -152,7 +147,7 @@ final class WorkerLcduiActions {
 	}
 
 	static Json listMove(final Json request) {
-		return onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Displayable current = currentDisplayable();
 				if (!(current instanceof javax.microedition.lcdui.List)) {
@@ -195,7 +190,7 @@ final class WorkerLcduiActions {
 	}
 
 	static Json choiceSet(final Json request) {
-		return onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Form form = requireForm();
 				int itemIndex = request.at("itemIndex", -1).asInteger();
@@ -218,15 +213,31 @@ final class WorkerLcduiActions {
 	}
 
 	static Json gaugeSet(final Json request) {
-		return onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Form form = requireForm();
 				Gauge gauge = (Gauge) findItem(
 					form,
 					request.at("itemIndex", -1).asInteger(),
 					Gauge.class);
+				if (!request.has("value") || request.at("value").isNull()) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"gauge-set requires value");
+				}
+				int value = request.at("value").asInteger();
+				int maxValue = gauge.getMaxValue();
+				int upperBound = gauge.isInteractive() || maxValue != Gauge.INDEFINITE
+					? maxValue
+					: Gauge.INCREMENTAL_UPDATING;
+				if (value < 0 || value > upperBound) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"Gauge value is out of range: " + value,
+						Json.object().set("value", value).set("maxValue", maxValue));
+				}
 				long oldRevision = WorkerEventModel.revision();
-				gauge.setValue(request.at("value").asInteger());
+				gauge.setValue(value);
 				form._itemStateChanged(gauge);
 				return Json.object()
 					.set("oldRevision", oldRevision)
@@ -238,7 +249,7 @@ final class WorkerLcduiActions {
 	}
 
 	static Json textBoxSet(final Json request) {
-		Json result = onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Displayable current = currentDisplayable();
 				if (!(current instanceof javax.microedition.lcdui.TextBox)) {
@@ -278,26 +289,35 @@ final class WorkerLcduiActions {
 					.set("maxSize", textBox.getMaxSize());
 			}
 		});
-		result.set("state", WorkerSessionSnapshot.build(false));
-		return result;
 	}
 
 	static Json textFieldSet(final Json request) {
-		return onEventThread(request, new Action() {
+		return mutate(request, new Action() {
 			public Json run() {
 				Form form = requireForm();
 				TextField textField = (TextField) findItem(
 					form,
 					request.at("itemIndex", -1).asInteger(),
 					TextField.class);
-				long oldRevision = WorkerEventModel.revision();
 				String value = request.at("value", "").asString();
+				if (value.length() > textField.getMaxSize()) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"Text exceeds the TextField maxSize",
+						Json.object()
+							.set("maxSize", textField.getMaxSize())
+							.set("textLength", value.length()));
+				}
+				long oldRevision = WorkerEventModel.revision();
 				textField.setString(value);
 				form._itemStateChanged(textField);
 				return Json.object()
 					.set("oldRevision", oldRevision)
 					.set("newRevision", WorkerEventModel.revision())
-					.set("value", textField.getString());
+					.set("text", textField.getString())
+					.set("caret", textField.getCaretPosition())
+					.set("constraints", textField.getConstraints())
+					.set("maxSize", textField.getMaxSize());
 			}
 		});
 	}
@@ -319,7 +339,7 @@ final class WorkerLcduiActions {
 					Json.object()
 						.set("timeoutMs", timeoutMs)
 						.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
-						.set("lastRevision", WorkerEventModel.revision()));
+						.set("currentRevision", WorkerEventModel.revision()));
 			}
 			WorkerFrontendThread.call(new java.util.concurrent.Callable<Object>() {
 				public Object call() {
@@ -335,8 +355,9 @@ final class WorkerLcduiActions {
 				e);
 		}
 		return Json.object()
-			.set("idle", true)
-			.set("revision", WorkerEventModel.revision())
-			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+			.set("condition", "idle")
+			.set("matched", true)
+			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
+			.set("state", WorkerSessionSnapshot.build(false));
 	}
 }

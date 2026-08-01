@@ -33,6 +33,19 @@ public final class CliResponses {
 		return value.dup();
 	}
 
+	private static Json publicWorker(Json worker) {
+		if (worker == null || !worker.isObject()) {
+			return Json.nil();
+		}
+
+		return Json.object()
+			.set("pid", worker.at("pid", Json.nil()))
+			.set("alive", worker.at("alive", Json.nil()))
+			.set("ready", worker.at("ready", Json.nil()))
+			.set("sessionId", worker.at("sessionId", Json.nil()))
+			.set("logPath", worker.at("logPath", Json.nil()));
+	}
+
 	public static Json publicizeOpenResult(Json input) {
 		Json payload = normalizePublicJson(input);
 		Json result = Json.object();
@@ -44,24 +57,9 @@ public final class CliResponses {
 			result.set("inputPath", payload.at("inputPath"));
 		}
 
-		Json worker = payload.at("worker");
-		if (worker != null && worker.isObject()) {
-			result.set(
-				"worker",
-				Json.object()
-					.set("pid", worker.at("pid", Json.nil()))
-					.set("alive", worker.at("alive", Json.nil()))
-					.set("ready", worker.at("ready", Json.nil()))
-					.set("sessionId", worker.at("sessionId", Json.nil()))
-					.set("logPath", worker.at("logPath", Json.nil())));
-		}
-
-		Json session = payload.at("session");
-		if (session != null && session.isObject()) {
-			for (String key : session.asJsonMap().keySet()) {
-				result.set(key, session.at(key));
-			}
-		}
+		result.set("worker", publicWorker(payload.at("worker")));
+		result.set("status", payload.at("status", Json.nil()));
+		result.set("state", payload.at("state", Json.nil()));
 
 		return result;
 	}
@@ -79,35 +77,15 @@ public final class CliResponses {
 		return Json.object().set("ok", false).set("command", commandName).set("error", error);
 	}
 
-	public static Json buildStatePayload(Json current, Json session) {
+	/** One canonical projection: {active, app, state} for state and observe. */
+	public static Json buildSnapshotPayload(Json current, Json snapshot) {
 		if (!current.at("active", false).asBoolean()) {
 			return Json.object().set("active", false);
 		}
 
-		Json snapshot = session.at("session");
 		return Json.object()
 			.set("active", true)
 			.set("app", current.at("app"))
-			.set("schemaVersion", snapshot.at("schemaVersion"))
-			.set("revision", snapshot.at("revision"))
-			.set("ready", snapshot.at("ready", false).asBoolean())
-			.set("midletStarted", snapshot.at("midletStarted", false).asBoolean())
-			.set("displayable", snapshot.at("displayable"))
-			.set("memoryCard", snapshot.at("memoryCard"))
-			.set("permissionRequest", snapshot.at("permissionRequest"));
-	}
-
-	public static Json buildObservePayload(Json current, Json session) {
-		if (!current.at("active", false).asBoolean()) {
-			return Json.object().set("active", false);
-		}
-
-		Json payload = normalizePublicJson(session);
-		payload.set("active", true);
-		if (current.has("app")) {
-			payload.set("app", current.at("app"));
-		}
-
-		return payload;
+			.set("state", normalizePublicJson(snapshot));
 	}
 }

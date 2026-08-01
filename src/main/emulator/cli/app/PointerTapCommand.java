@@ -1,11 +1,11 @@
 package emulator.cli.app;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.ControllerCalls;
 import emulator.cli.controller.ControllerLifecycle;
 import emulator.cli.controller.ControllerStatus;
 import emulator.cli.controller.ControllerStatusService;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -23,9 +23,8 @@ public final class PointerTapCommand implements CliCommand {
 		boolean json = invocation.json();
 		if (invocation.tokens().size() < 4 || invocation.tokens().size() > 5) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
-				"Usage: kemu pointer tap <x> <y> [--wait-dispatched]",
-				CliExitCodes.USAGE,
+				CliErrorCodes.USAGE_ERROR,
+				emulator.cli.output.CliTextRenderer.usageText("pointer tap"),
 				"pointer tap",
 				json);
 		}
@@ -35,16 +34,15 @@ public final class PointerTapCommand implements CliCommand {
 			&& "--wait-dispatched".equals(invocation.tokens().get(4));
 		if (invocation.tokens().size() == 5 && !wait) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
-				"Usage: kemu pointer tap <x> <y> [--wait-dispatched]",
-				CliExitCodes.USAGE,
+				CliErrorCodes.USAGE_ERROR,
+				emulator.cli.output.CliTextRenderer.usageText("pointer tap"),
 				"pointer tap",
 				json);
 		}
 		ControllerStatus status = ControllerLifecycle.requireRunningController("pointer tap", json);
 		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
 			ControllerStatusService.controllerClient(status),
-			"app.tap",
+			"app.pointer.tap",
 			Json.object().set("x", x).set("y", y).set("waitDispatched", wait),
 			"pointer tap",
 			json));

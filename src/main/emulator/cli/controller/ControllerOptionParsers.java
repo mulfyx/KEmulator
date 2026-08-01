@@ -1,25 +1,23 @@
 package emulator.cli.controller;
 
-import emulator.cli.core.CliExitCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
 import emulator.cli.support.CliDefaults;
 import java.util.List;
-import java.util.Locale;
 
 final class ControllerOptionParsers {
 	private ControllerOptionParsers() {
 	}
 
 	static KemuCliException duplicateOption(String option, String commandName, boolean json) {
-		return new KemuCliException(
-			"USAGE_ERROR", "Duplicate option: " + option + '.', CliExitCodes.USAGE, commandName, json);
+		return CliParsing.duplicateOption(option, commandName, json);
 	}
 
 	static KemuCliException usageError(String commandName, boolean json) {
 		return new KemuCliException(
-			"USAGE_ERROR", CliTextRenderer.usageText(commandName), CliExitCodes.USAGE, commandName, json);
+			CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText(commandName), commandName, json);
 	}
 
 	private static void requireSingleAssignment(Object value, String option, String commandName, boolean json) {
@@ -39,19 +37,7 @@ final class ControllerOptionParsers {
 		}
 
 		throw new KemuCliException(
-			"USAGE_ERROR", "Conflicting options: --headless and --visible.", CliExitCodes.USAGE, commandName, json);
-	}
-
-	private static int[] parseSize(String value, String commandName, boolean json) {
-		String[] parts = value.toLowerCase(Locale.US).split("x");
-		if (parts.length != 2) {
-			throw usageError(commandName, json);
-		}
-
-		return new int[]{
-			CliParsing.parseIntegerArgument(parts[0], "width", commandName, json),
-			CliParsing.parseIntegerArgument(parts[1], "height", commandName, json)
-		};
+			CliErrorCodes.USAGE_ERROR, "Conflicting options: --headless and --visible.", commandName, json);
 	}
 
 	static StartOptions parseStartOptions(
@@ -89,7 +75,7 @@ final class ControllerOptionParsers {
 					throw duplicateOption("--size", commandName, json);
 				}
 
-				int[] size = parseSize(tokens.get(++i), commandName, json);
+				int[] size = CliParsing.parseSize(tokens.get(++i), commandName, json);
 				width = Integer.valueOf(size[0]);
 				height = Integer.valueOf(size[1]);
 			} else {

@@ -1,5 +1,7 @@
 package emulator.cli.controller;
 
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.*;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.support.KemuPaths;
@@ -28,16 +30,15 @@ public final class ControllerLifecycle {
 
 		if (status.degraded) {
 			throw new KemuCliException(
-				"CONTROLLER_UNREACHABLE",
+				AutomationErrorCodes.CONTROLLER_UNREACHABLE,
 				"Controller process exists but is unreachable. Retry with 'kemu stop --force'.",
-				CliExitCodes.RUNTIME,
 				commandName,
 				json);
 		}
 
 		if (!status.running) {
 			throw new KemuCliException(
-				"CONTROLLER_NOT_RUNNING", "Controller is not running.", CliExitCodes.RUNTIME, commandName, json);
+				CliErrorCodes.CONTROLLER_NOT_RUNNING, "Controller is not running.", commandName, json);
 		}
 
 		return status;
@@ -73,7 +74,7 @@ public final class ControllerLifecycle {
 	public static void requireTokenCount(List<String> tokens, int count, String commandName, boolean json) {
 		if (tokens.size() != count) {
 			throw new KemuCliException(
-				"USAGE_ERROR", CliTextRenderer.usageText(commandName), CliExitCodes.USAGE, commandName, json);
+				CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText(commandName), commandName, json);
 		}
 	}
 }

@@ -1,7 +1,7 @@
 package emulator.cli.controller;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -21,13 +21,16 @@ public final class LogsReadCommand implements CliCommand {
 		for (int i = 2; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
 			if ("--since".equals(token)) {
-				if (since != null || i + 1 >= invocation.tokens().size()) {
+				if (since != null) {
+					throw emulator.cli.parse.CliParsing.duplicateOption(token, "logs read", json);
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(json);
 				}
 				since = invocation.tokens().get(++i);
 			} else if ("--jsonl".equals(token)) {
 				if (jsonl) {
-					throw usage(json);
+					throw emulator.cli.parse.CliParsing.duplicateOption(token, "logs read", json);
 				}
 				jsonl = true;
 			} else {
@@ -61,9 +64,8 @@ public final class LogsReadCommand implements CliCommand {
 
 	private KemuCliException usage(boolean json) {
 		return new KemuCliException(
-			"USAGE_ERROR",
-			"Usage: kemu logs read [--since CURSOR] [--jsonl]",
-			CliExitCodes.USAGE,
+			CliErrorCodes.USAGE_ERROR,
+			emulator.cli.output.CliTextRenderer.usageText("logs read"),
 			"logs read",
 			json);
 	}

@@ -1,5 +1,6 @@
 package emulator.cli;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.app.*;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
@@ -34,7 +35,7 @@ public final class KemuMain {
 			System.exit(e.exitCode);
 		} catch (Exception e) {
 			if (json) {
-				writeJson(CliResponses.errorEnvelope(null, "INTERNAL_ERROR", e.toString(), null));
+				writeJson(CliResponses.errorEnvelope(null, CliErrorCodes.INTERNAL_ERROR, e.toString(), null));
 			} else {
 				e.printStackTrace(System.err);
 			}

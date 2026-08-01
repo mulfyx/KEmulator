@@ -53,7 +53,7 @@ final class WorkerProtocolClient {
 				}
 				socket.setSoTimeout(readTimeout);
 				Json envelope = Json.object()
-					.set("id", worker.nextRequestId++)
+					.set("id", worker.nextRequestId.getAndIncrement())
 					.set("op", operation)
 					.set("args", request == null ? Json.object() : request);
 				OutputStream out = socket.getOutputStream();

@@ -17,8 +17,6 @@ import java.util.regex.PatternSyntaxException;
 import mjson.Json;
 
 final class ControllerWorkerSession {
-	private static final long DEFAULT_OPEN_TIMEOUT_MS = 30000L;
-	private static final long MAX_OPEN_TIMEOUT_MS = 600000L;
 
 	private final AppTargetResolver entryResolver;
 	private final WorkerSupervisor workerSupervisor;
@@ -34,23 +32,8 @@ final class ControllerWorkerSession {
 
 	private Json buildWorkerFailure(WorkerProcess worker, String message) {
 		Json failure = Json.object().set("code", AutomationErrorCodes.WORKER_FAILURE).set("message", message);
-		Json details = Json.object();
-		if (worker != null) {
-			if (worker.entry != null) {
-				details.set("app", worker.entry.toJson());
-			}
-
-			details.set("worker", worker.toJson());
-			try {
-				String tail = workerSupervisor.readLogTail(worker, 30).trim();
-				if (tail.length() > 0) {
-					details.set("logTail", tail);
-				}
-			} catch (IOException ignored) {
-			}
-		}
-
-		if (!details.asJsonMap().isEmpty()) {
+		Json details = WorkerDiagnostics.buildWorkerDetails(worker, null);
+		if (details != null) {
 			failure.set("details", details);
 		}
 
@@ -152,11 +135,25 @@ final class ControllerWorkerSession {
 	}
 
 	private static long openTimeoutMs(Json request) {
-		long timeoutMs = request.at("openTimeoutMs", DEFAULT_OPEN_TIMEOUT_MS).asLong();
-		if (timeoutMs < 1L || timeoutMs > MAX_OPEN_TIMEOUT_MS) {
+		long timeoutMs = request.at(
+			"timeoutMs", (long) emulator.automation.shared.AutomationLimits.DEFAULT_OPEN_TIMEOUT_MS).asLong();
+		if (timeoutMs < emulator.automation.shared.AutomationLimits.MIN_OPEN_TIMEOUT_MS
+			|| timeoutMs > emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS) {
 			throw new AutomationException(
 				AutomationErrorCodes.INVALID_REQUEST,
-				"openTimeoutMs must be between 1 and " + MAX_OPEN_TIMEOUT_MS);
+				"timeoutMs must be between " + emulator.automation.shared.AutomationLimits.MIN_OPEN_TIMEOUT_MS
+					+ " and " + emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS);
+		}
+
+		return timeoutMs;
+	}
+
+	private static long boundedTimeoutMs(Json arguments, long defaultMs) {
+		long timeoutMs = arguments.at("timeoutMs", defaultMs).asLong();
+		if (timeoutMs < 0L || timeoutMs > emulator.automation.shared.AutomationLimits.MAX_WAIT_MS) {
+			throw new AutomationException(
+				AutomationErrorCodes.INVALID_REQUEST,
+				"timeoutMs must be between 0 and " + emulator.automation.shared.AutomationLimits.MAX_WAIT_MS);
 		}
 
 		return timeoutMs;
@@ -185,7 +182,14 @@ final class ControllerWorkerSession {
 		synchronized (this) {
 			cleanupDeadWorkerLocked();
 			if (activeWorker != null || openInProgress) {
-				throw new AutomationException(AutomationErrorCodes.APP_ALREADY_OPEN, "Another app is already active");
+				Json details = Json.object();
+				if (activeWorker != null) {
+					details.set("app", activeWorker.entry.toJson());
+					details.set("worker", activeWorker.toJson());
+				}
+
+				throw new AutomationException(
+					AutomationErrorCodes.APP_ALREADY_OPEN, "Another app is already active", details);
 			}
 
 			openInProgress = true;
@@ -209,9 +213,8 @@ final class ControllerWorkerSession {
 				return Json.object()
 					.set("app", entry.toJson())
 					.set("worker", worker.toJson())
-					.set(
-						"session",
-						Json.object().set("status", "starting").set("ready", false));
+					.set("status", "starting")
+					.set("state", Json.nil());
 			}
 
 			Json session;
@@ -237,12 +240,11 @@ final class ControllerWorkerSession {
 				worker.ready = true;
 			}
 
-			session = session.dup().set("status", sessionStatus(session));
-
 			return Json.object()
 				.set("app", entry.toJson())
 				.set("worker", worker.toJson())
-				.set("session", session);
+				.set("status", sessionStatus(session))
+				.set("state", session);
 		} finally {
 			synchronized (this) {
 				openInProgress = false;
@@ -325,7 +327,7 @@ final class ControllerWorkerSession {
 				} catch (InterruptedException interrupted) {
 					Thread.currentThread().interrupt();
 					throw new AutomationException(
-						AutomationErrorCodes.WORKER_STARTING,
+						AutomationErrorCodes.WORKER_FAILURE,
 						"Interrupted while waiting for the starting worker",
 						Json.object().set("worker", worker.toJson()),
 						interrupted);
@@ -346,7 +348,7 @@ final class ControllerWorkerSession {
 		return Json.object()
 			.set("app", worker.entry.toJson())
 			.set("worker", worker.toJson())
-			.set("session", callWorker(worker, "session", Json.object(), false));
+			.set("state", callWorker(worker, "session", Json.object(), false));
 	}
 
 	private static String logCursor(WorkerProcess worker, long offset) {
@@ -384,7 +386,8 @@ final class ControllerWorkerSession {
 				.set("cursor", logCursor(worker, 0L))
 				.set("fromOffset", 0L)
 				.set("toOffset", 0L)
-				.set("text", "");
+				.set("text", "")
+				.set("lines", Json.array());
 		}
 		long size = Files.size(worker.logPath);
 		long from = Math.min(offset, size);
@@ -406,7 +409,7 @@ final class ControllerWorkerSession {
 			if (i == split.length - 1 && split[i].length() == 0) {
 				continue;
 			}
-			lines.add(Json.object().set("offset", from).set("line", split[i]));
+			lines.add(Json.object().set("line", split[i]));
 		}
 		return Json.object()
 			.set("cursor", logCursor(worker, size))
@@ -427,7 +430,7 @@ final class ControllerWorkerSession {
 			: 0L;
 		return Json.object()
 			.set("cursor", logCursor(worker, size))
-			.set("offset", size)
+			.set("toOffset", size)
 			.set("worker", worker.toJson());
 	}
 
@@ -475,7 +478,7 @@ final class ControllerWorkerSession {
 			arguments.has("since") && !arguments.at("since").isNull()
 				? arguments.at("since").asString()
 				: null);
-		long timeoutMs = arguments.at("timeoutMs", 5000L).asLong();
+		long timeoutMs = boundedTimeoutMs(arguments, 5000L);
 		long start = System.nanoTime();
 		long deadline = start + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
 		Json last = Json.object();
@@ -528,7 +531,7 @@ final class ControllerWorkerSession {
 				.set("regex", regex)
 				.set("timeoutMs", timeoutMs)
 				.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
-				.set("lastState", last)
+				.set("lastLog", last)
 				.set("worker", worker.toJson()));
 	}
 
@@ -539,7 +542,7 @@ final class ControllerWorkerSession {
 			worker,
 			"observe",
 			Json.object()
-				.set("includeImage", arguments.at("includeImage", true).asBoolean()),
+				.set("includeImage", arguments.at("includeImage", false).asBoolean()),
 			false);
 	}
 
@@ -552,7 +555,7 @@ final class ControllerWorkerSession {
 	}
 
 	Json waitWorkerExit(Json arguments) throws Exception {
-		long timeoutMs = arguments.at("timeoutMs", 5000L).asLong();
+		long timeoutMs = boundedTimeoutMs(arguments, 5000L);
 		long start = System.nanoTime();
 		WorkerProcess worker;
 		synchronized (this) {
@@ -560,10 +563,15 @@ final class ControllerWorkerSession {
 			worker = activeWorker != null ? activeWorker : lastWorkerForLogs;
 		}
 		if (worker == null || worker.process == null || !worker.process.isAlive()) {
-			return Json.object()
+			Json result = Json.object()
 				.set("condition", "worker-exit")
-				.set("exited", true)
+				.set("matched", true)
 				.set("elapsedMs", 0);
+			if (worker != null && worker.process != null) {
+				result.set("exitCode", worker.process.exitValue());
+			}
+
+			return result;
 		}
 		boolean exited;
 		try {
@@ -584,14 +592,14 @@ final class ControllerWorkerSession {
 					.set("condition", "worker-exit")
 					.set("timeoutMs", timeoutMs)
 					.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
-					.set("lastState", worker.toJson()));
+					.set("worker", worker.toJson()));
 		}
 		synchronized (this) {
 			cleanupDeadWorkerLocked();
 		}
 		return Json.object()
 			.set("condition", "worker-exit")
-			.set("exited", true)
+			.set("matched", true)
 			.set("exitCode", worker.process.exitValue())
 			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
 	}

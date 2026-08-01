@@ -1,5 +1,7 @@
 package emulator.cli.controller;
 
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.*;
 import mjson.Json;
 
@@ -54,9 +56,8 @@ public final class StopCommand implements CliCommand {
 					}
 				} else if (status.degraded && !finalForce) {
 					throw new KemuCliException(
-						"STOP_FAILED",
+						AutomationErrorCodes.CONTROLLER_UNREACHABLE,
 						"Controller is unreachable. Retry with --force.",
-						CliExitCodes.RUNTIME,
 						"stop",
 						json);
 				}
@@ -68,7 +69,7 @@ public final class StopCommand implements CliCommand {
 
 				if (!stopped) {
 					throw new KemuCliException(
-						"STOP_FAILED", "Controller did not stop cleanly.", CliExitCodes.RUNTIME, "stop", json);
+						CliErrorCodes.STOP_FAILED, "Controller did not stop cleanly.", "stop", json);
 				}
 
 				ControllerStatusService.deleteStateFiles();

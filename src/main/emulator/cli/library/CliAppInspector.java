@@ -1,5 +1,6 @@
 package emulator.cli.library;
 
+import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.*;
 import emulator.cli.core.*;
 import emulator.cli.output.CliResponses;
@@ -20,7 +21,6 @@ final class CliAppInspector {
 			throw new KemuCliException(
 				e.code,
 				e.getMessage(),
-				CliErrorMapping.exitCodeFor(e.code),
 				commandName,
 				json,
 				CliResponses.normalizePublicJson(e.details));
@@ -58,9 +58,8 @@ final class CliAppInspector {
 	static void validateOpenTarget(InspectionResult inspection, Integer midletIndex, String commandName, boolean json) {
 		if (inspection.midlets.size() > 1 && midletIndex == null) {
 			throw new KemuCliException(
-				"MIDLET_SELECTION_REQUIRED",
+				AutomationErrorCodes.MIDLET_SELECTION_REQUIRED,
 				"Multiple MIDlets found. Use --midlet with one of the reported indexes.",
-				CliExitCodes.USAGE,
 				commandName,
 				json,
 				inspection.toJson());
@@ -77,9 +76,8 @@ final class CliAppInspector {
 		}
 
 		throw new KemuCliException(
-			"UNKNOWN_MIDLET",
+			AutomationErrorCodes.UNKNOWN_MIDLET,
 			"Unknown MIDlet index: " + midletIndex,
-			CliExitCodes.USAGE,
 			commandName,
 			json,
 			inspection.toJson());

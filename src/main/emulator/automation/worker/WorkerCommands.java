@@ -158,20 +158,7 @@ final class WorkerCommands {
 
 		refreshFromCurrentDisplay();
 		long oldRevision = WorkerEventModel.revision();
-		if (!request.has("expectRevision") || request.at("expectRevision").isNull()) {
-			throw new AutomationException(
-				AutomationErrorCodes.INVALID_REQUEST,
-				"select-command requires expectRevision");
-		}
-		long expectedRevision = request.at("expectRevision").asLong();
-		if (expectedRevision != oldRevision) {
-			throw new AutomationException(
-				AutomationErrorCodes.STALE_REVISION,
-				"Stale revision: " + expectedRevision + ", current: " + oldRevision,
-				Json.object()
-					.set("expectedRevision", expectedRevision)
-					.set("currentRevision", oldRevision));
-		}
+		RevisionGuard.check(request);
 		final TargetedCommand command;
 		synchronized (LOCK) {
 			command = id >= 0
@@ -193,22 +180,14 @@ final class WorkerCommands {
 		long startedAt = System.nanoTime();
 		final long invocationId = nextInvocationId();
 		long eventCursor = WorkerEventModel.cursor();
-		final Long requiredRevision = request.has("expectRevision")
-			&& !request.at("expectRevision").isNull()
-				? Long.valueOf(request.at("expectRevision").asLong())
-				: null;
+		final Long requiredRevision = RevisionGuard.expected(request);
 		try {
 			if (!command.enqueueAndWait(timeoutMs, new Runnable() {
 				public void run() {
 					long currentRevision = WorkerEventModel.revision();
 					if (requiredRevision != null
 						&& requiredRevision.longValue() != currentRevision) {
-						throw new AutomationException(
-							AutomationErrorCodes.STALE_REVISION,
-							"Stale revision: " + requiredRevision + ", current: " + currentRevision,
-							Json.object()
-								.set("expectedRevision", requiredRevision.longValue())
-								.set("currentRevision", currentRevision));
+						throw RevisionGuard.stale(requiredRevision.longValue(), currentRevision);
 					}
 					if (!command.isCurrentTarget()) {
 						throw new AutomationException(
@@ -278,9 +257,8 @@ final class WorkerCommands {
 				long pendingElapsedMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
 					System.nanoTime() - startedAt);
 				return Json.object()
-					.set("ok", true)
 					.set("pending", true)
-					.set("status", "permission-pending")
+					.set("status", "pending-permission")
 					.set("id", id)
 					.set("label", command.command == null ? null : command.command.getLabel())
 					.set("text", command.text)
@@ -326,7 +304,6 @@ final class WorkerCommands {
 			System.nanoTime() - startedAt);
 
 		Json result = Json.object()
-			.set("ok", true)
 			.set("id", id)
 			.set("label", command.command == null ? null : command.command.getLabel())
 			.set("text", command.text)

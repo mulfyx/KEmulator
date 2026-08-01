@@ -16,8 +16,11 @@ json_escape() {
 	printf '%s' "$value"
 }
 
+LITERAL_ARGS=0
 for arg in "$@"; do
-	if [[ "$arg" == "--json" ]]; then
+	if [[ "$LITERAL_ARGS" == "0" && "$arg" == "--" ]]; then
+		LITERAL_ARGS=1
+	elif [[ "$LITERAL_ARGS" == "0" && "$arg" == "--json" ]]; then
 		JSON_MODE=1
 	elif [[ "$COMMAND_JSON" == "null" && "$arg" != --* ]]; then
 		COMMAND_JSON="\"$(json_escape "$arg")\""

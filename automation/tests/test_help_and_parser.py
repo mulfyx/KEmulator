@@ -15,7 +15,7 @@ def test_command_run_help_topic(kemu):
     result = kemu.ok("help", "command", "run", command="help")
     assert result["topic"] == "command run"
     assert result["usage"].startswith(
-        "Usage: kemu command run <--id ID|--label LABEL> --expect-revision REV")
+        "Usage: kemu command run <--id ID|--label LABEL> [--expect-revision REV]")
 
 
 def test_help_topic_for_every_public_command(kemu, known_commands):
@@ -59,7 +59,7 @@ def test_removed_legacy_surface(kemu):
 def test_bare_groups_are_usage_errors(kemu):
     for group in ("logs", "wait", "key", "pointer", "list", "choice",
                   "gauge", "text-field", "text-box", "rms", "events",
-                  "command"):
+                  "command", "permission"):
         outcome = kemu.err(group, code="USAGE_ERROR")
         assert f"kemu {group}" in outcome.error["message"], group
 
@@ -87,8 +87,12 @@ def test_open_parser_errors(kemu, fixtures):
          "USAGE_ERROR"),
         (("drag", "20", "20", "120", "120", "--delay", "4"), "USAGE_ERROR"),
         (("command", "run", "--id", "1", "--expect-revision"), "USAGE_ERROR"),
+        (("command", "run", "--id", "1", "--expect-revision", "-1"), "USAGE_ERROR"),
         (("resize", "0x100"), "USAGE_ERROR"),
         (("resize", "100"), "USAGE_ERROR"),
+        (("resize", "5000x100"), "USAGE_ERROR"),
+        (("start", "--size", "0x0"), "USAGE_ERROR"),
+        (("screenshot", "--out", "shot.png"), "USAGE_ERROR"),
     ],
 )
 def test_representative_parser_failures(kemu, args, code):

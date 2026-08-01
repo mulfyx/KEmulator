@@ -1,6 +1,7 @@
 package emulator.cli.controller;
 
-import emulator.cli.core.CliExitCodes;
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.support.CliDefaults;
 import emulator.cli.support.KemuPaths;
@@ -20,18 +21,16 @@ final class ControllerProcessLauncher {
 		ControllerStatus status, StartOptions options, String commandName, boolean json) {
 		if (options.mode != null && status.mode != null && !options.mode.equals(status.mode)) {
 			throw new KemuCliException(
-				"CONFLICTING_CONTROLLER_DEFAULTS",
+				CliErrorCodes.CONFLICTING_CONTROLLER_DEFAULTS,
 				"Controller mode is " + status.mode + ", not " + options.mode + '.',
-				CliExitCodes.RUNTIME,
 				commandName,
 				json);
 		}
 
 		if (options.runtime != null && status.runtime != null && !options.runtime.equals(status.runtime)) {
 			throw new KemuCliException(
-				"CONFLICTING_CONTROLLER_DEFAULTS",
+				CliErrorCodes.CONFLICTING_CONTROLLER_DEFAULTS,
 				"Controller runtime is " + status.runtime + ", not " + options.runtime + '.',
-				CliExitCodes.RUNTIME,
 				commandName,
 				json);
 		}
@@ -40,9 +39,8 @@ final class ControllerProcessLauncher {
 			String expected = options.width + "x" + options.height;
 			if (!expected.equals(status.screen)) {
 				throw new KemuCliException(
-					"CONFLICTING_CONTROLLER_DEFAULTS",
+					CliErrorCodes.CONFLICTING_CONTROLLER_DEFAULTS,
 					"Controller screen is " + status.screen + ", not " + expected + '.',
-					CliExitCodes.RUNTIME,
 					commandName,
 					json);
 			}
@@ -62,10 +60,9 @@ final class ControllerProcessLauncher {
 			while (true) {
 				if (!process.isAlive()) {
 					throw new KemuCliException(
-						"START_FAILED",
+						CliErrorCodes.START_FAILED,
 						"Controller exited before becoming ready.\n"
 							+ ControllerStatusService.readLastLines(logFile, 40),
-						CliExitCodes.RUNTIME,
 						commandName,
 						json);
 				}
@@ -96,9 +93,8 @@ final class ControllerProcessLauncher {
 		}
 
 		throw new KemuCliException(
-			"START_TIMEOUT",
+			CliErrorCodes.START_TIMEOUT,
 			"Timed out waiting for controller readiness.\n" + ControllerStatusService.readLastLines(logFile, 40),
-			CliExitCodes.RUNTIME,
 			commandName,
 			json);
 	}
@@ -162,7 +158,7 @@ final class ControllerProcessLauncher {
 		ControllerStatus status = ControllerStatusService.readControllerStatus();
 		if (!status.running) {
 			throw new KemuCliException(
-				"START_FAILED", "Controller did not become ready.", CliExitCodes.RUNTIME, commandName, json);
+				CliErrorCodes.START_FAILED, "Controller did not become ready.", commandName, json);
 		}
 
 		return status;
@@ -190,15 +186,14 @@ final class ControllerProcessLauncher {
 		if (!autoStart) {
 			if (status.degraded) {
 				throw new KemuCliException(
-					"CONTROLLER_UNREACHABLE",
+					AutomationErrorCodes.CONTROLLER_UNREACHABLE,
 					"Controller process exists but is unreachable.",
-					CliExitCodes.RUNTIME,
 					commandName,
 					json);
 			}
 
 			throw new KemuCliException(
-				"CONTROLLER_NOT_RUNNING", "Controller is not running.", CliExitCodes.RUNTIME, commandName, json);
+				CliErrorCodes.CONTROLLER_NOT_RUNNING, "Controller is not running.", commandName, json);
 		}
 
 		return startController(options, commandName, json);

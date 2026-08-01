@@ -4,25 +4,25 @@
 def test_observe_schema_and_atomic_command(kemu, fixtures):
     opened = kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
     assert opened["status"] == "ready"
-    assert opened["ready"] is True
-    assert opened["displayable"]["kind"] == "list"
-    assert "gamePath" not in opened and "gameName" not in opened
+    assert set(opened) == {"app", "worker", "status", "state", "inputPath"}
+    assert opened["state"]["ready"] is True
+    assert opened["state"]["displayable"]["kind"] == "list"
 
     observation = kemu.observe()
     assert observation["active"] is True
-    assert observation["schemaVersion"] == 3
-    displayable = observation["displayable"]
+    assert set(observation) == {"active", "app", "state"}
+    snapshot = observation["state"]
+    assert snapshot["schemaVersion"] == 3
+    displayable = snapshot["displayable"]
     assert displayable["title"] == "Mega menu"
     assert isinstance(displayable["commands"], list)
-    assert isinstance(observation["revision"], int)
-    for legacy_key in ("title", "displayableKind", "commands", "imageBase64"):
-        assert legacy_key not in observation
+    assert isinstance(snapshot["revision"], int)
 
     kemu.run_command("Open editor")
-    observation = kemu.observe()
-    assert observation["displayable"]["kind"] == "text_box"
-    assert observation["displayable"]["title"] == "Mega editor"
-    assert observation["displayable"]["text"] == "alpha"
+    displayable = kemu.state_of()["displayable"]
+    assert displayable["kind"] == "text_box"
+    assert displayable["title"] == "Mega editor"
+    assert displayable["text"] == "alpha"
 
     kemu.ok("key", "press", "SOFT_RIGHT", "--wait-dispatched")
     assert kemu.title() == "Mega menu"
@@ -45,7 +45,7 @@ def test_canvas_input_keys_pointer_drag(kemu, fixtures):
     kemu.ok("drag", "10", "10", "50", "60", "80", "90", "--delay", "10")
     assert kemu.title() == "Drag 10,10 -> 80,90"
 
-    frame_revision = int(kemu.observe()["frameRevision"])
+    frame_revision = int(kemu.state_of()["frameRevision"])
     kemu.ok("pointer", "tap", "20", "20", "--wait-dispatched")
     waited = kemu.ok("wait", "frame",
                      "--after-revision", str(frame_revision),
@@ -80,7 +80,7 @@ def test_stale_revision_and_unknown_ids(kemu, fixtures):
 def test_autonomous_fixture_stale_revisions(kemu, fixtures):
     kemu.open_ready(fixtures["AUTO_SNAPSHOT_FIXTURE_JAR"])
     observation = kemu.observe()
-    assert observation["displayable"]["title"] == "Auto menu"
+    assert kemu.title(observation) == "Auto menu"
     revision = kemu.revision(observation)
     editor_id = kemu.command_id(observation, "Open editor")
     kemu.wait_title("Auto editor")
@@ -90,7 +90,7 @@ def test_autonomous_fixture_stale_revisions(kemu, fixtures):
 
     kemu.open_ready(fixtures["MUTABLE_TITLE_FIXTURE_JAR"])
     observation = kemu.observe()
-    assert observation["displayable"]["title"] == "Mutable menu"
+    assert kemu.title(observation) == "Mutable menu"
     revision = kemu.revision(observation)
     editor_id = kemu.command_id(observation, "Open editor")
     kemu.wait_title("Mutable menu updated")
@@ -102,8 +102,9 @@ def test_list_select_and_move(kemu, fixtures):
     kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
     kemu.run_command("To list")
     observation = kemu.observe()
-    assert observation["displayable"]["kind"] == "list"
-    assert [item["text"] for item in observation["displayable"]["items"]] == [
+    displayable = kemu.state_of(observation)["displayable"]
+    assert displayable["kind"] == "list"
+    assert [item["text"] for item in displayable["items"]] == [
         "one", "two", "three"]
 
     result = kemu.ok("list", "select", "2",
@@ -119,7 +120,7 @@ def test_list_select_and_move(kemu, fixtures):
 def test_form_choice_gauge_text_field(kemu, fixtures):
     kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
     observation = kemu.observe()
-    displayable = observation["displayable"]
+    displayable = kemu.state_of(observation)["displayable"]
     assert displayable["kind"] == "form"
     kinds = [item["kind"] for item in displayable["items"]]
     assert kinds == ["string-item", "gauge", "choice-group", "text-field"]
@@ -132,9 +133,10 @@ def test_form_choice_gauge_text_field(kemu, fixtures):
     assert result["selectedIndex"] == 1
 
     result = kemu.ok("text-field", "set", "xyz")
-    assert result["value"] == "xyz"
+    assert result["text"] == "xyz"
+    assert 0 <= result["caret"] <= len("xyz")  # caret placement is impl-defined
 
-    items = kemu.observe()["displayable"]["items"]
+    items = kemu.state_of()["displayable"]["items"]
     assert items[0]["text"] == "field=xyz"  # item-state callbacks were delivered
     assert items[1]["value"] == 7
     assert items[2]["selectedIndex"] == 1
@@ -153,7 +155,7 @@ def test_text_box_set(kemu, fixtures):
 
     kemu.run_command("Open editor")
     observation = kemu.observe()
-    assert observation["displayable"]["kind"] == "text_box"
+    assert kemu.state_of(observation)["displayable"]["kind"] == "text_box"
     editor_revision = kemu.revision(observation)
 
     result = kemu.ok("text-box", "set", "pwd",
@@ -161,11 +163,11 @@ def test_text_box_set(kemu, fixtures):
     assert result["text"] == "pwd"
     assert result["caret"] == 3
     assert result["newRevision"] > result["oldRevision"]
-    assert kemu.observe()["displayable"]["text"] == "pwd"
+    assert kemu.state_of()["displayable"]["text"] == "pwd"
 
     kemu.err("text-box", "set", "nope",
              "--expect-revision", str(editor_revision), code="STALE_REVISION")
-    assert kemu.observe()["displayable"]["text"] == "pwd"
+    assert kemu.state_of()["displayable"]["text"] == "pwd"
 
     kemu.ok("command", "run", "--label", "Save",
             "--expect-revision", str(kemu.revision()),
@@ -190,9 +192,9 @@ def test_resize_and_rotate(kemu, fixtures):
     kemu.ok("wait", "display",
             "--after-revision", str(resized["newRevision"]),
             "--timeout", "10000")
-    observation = kemu.observe()
-    assert observation["displayable"]["title"].startswith("Size 320x")
-    assert (observation["width"], observation["height"]) == (320, 240)
+    snapshot = kemu.state_of()
+    assert snapshot["displayable"]["title"].startswith("Size 320x")
+    assert (snapshot["width"], snapshot["height"]) == (320, 240)
 
     rotated = kemu.ok("rotate", "--wait-frame", "--timeout", "10000")
     assert (rotated["width"], rotated["height"]) == (240, 320)
@@ -207,4 +209,5 @@ def test_resize_and_rotate(kemu, fixtures):
     kemu.ok("resize", "240x320", "--expect-revision", str(current))
     kemu.err("resize", "100x100", "--expect-revision", str(current),
              code="STALE_REVISION")
-    assert (kemu.observe()["width"], kemu.observe()["height"]) == (240, 320)
+    snapshot = kemu.state_of()
+    assert (snapshot["width"], snapshot["height"]) == (240, 320)

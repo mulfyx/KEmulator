@@ -1,8 +1,9 @@
 package emulator.cli.app;
 
+import emulator.automation.shared.AutomationLimits;
 import emulator.cli.controller.*;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -17,128 +18,95 @@ public final class RunUiCommand implements CliCommand {
 		return CommandPath.of("command", "run");
 	}
 
-	public CommandResult run(CliInvocation invocation) throws Exception {
-		if (invocation.tokens().size() < 6) {
-			throw new KemuCliException(
-				"USAGE_ERROR",
-				CliTextRenderer.usageText("command run"),
-				CliExitCodes.USAGE,
-				"command run",
-				invocation.json());
-		}
+	private KemuCliException usage(boolean json) {
+		return new KemuCliException(
+			CliErrorCodes.USAGE_ERROR,
+			CliTextRenderer.usageText("command run"),
+			"command run",
+			json);
+	}
 
+	public CommandResult run(CliInvocation invocation) throws Exception {
+		boolean json = invocation.json();
 		Integer id = null;
 		String label = null;
 		Long expectRevision = null;
 		boolean waitNextDisplay = false;
-		int timeoutMs = 5000;
+		Integer timeoutMs = null;
 		for (int i = 2; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
 			if ("--id".equals(token)) {
-				if (id != null || label != null || i + 1 >= invocation.tokens().size()) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("command run"),
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+				if (id != null) {
+					throw CliParsing.duplicateOption(token, "command run", json);
+				}
+				if (label != null || i + 1 >= invocation.tokens().size()) {
+					throw usage(json);
 				}
 				id = Integer.valueOf(CliParsing.parseIntegerArgument(
-					invocation.tokens().get(++i), "--id", "command run", invocation.json()));
+					invocation.tokens().get(++i), "--id", "command run", json));
 			} else if ("--label".equals(token)) {
-				if (label != null || id != null || i + 1 >= invocation.tokens().size()) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("command run"),
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+				if (label != null) {
+					throw CliParsing.duplicateOption(token, "command run", json);
+				}
+				if (id != null || i + 1 >= invocation.tokens().size()) {
+					throw usage(json);
 				}
 				label = invocation.tokens().get(++i);
 			} else if ("--expect-revision".equals(token)) {
-				if (expectRevision != null || i + 1 >= invocation.tokens().size()) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("command run"),
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+				if (expectRevision != null) {
+					throw CliParsing.duplicateOption(token, "command run", json);
 				}
-				try {
-					expectRevision = Long.valueOf(Long.parseLong(invocation.tokens().get(++i)));
-				} catch (NumberFormatException e) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("command run"),
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+				if (i + 1 >= invocation.tokens().size()) {
+					throw usage(json);
 				}
+				expectRevision = Long.valueOf(
+					CliParsing.parseRevision(invocation.tokens().get(++i), "command run", json));
 			} else if ("--wait-next-display".equals(token)) {
 				if (waitNextDisplay) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						"Duplicate option: --wait-next-display.",
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+					throw CliParsing.duplicateOption(token, "command run", json);
 				}
 				waitNextDisplay = true;
 			} else if ("--timeout".equals(token)) {
-				if (i + 1 >= invocation.tokens().size()) {
-					throw new KemuCliException(
-						"USAGE_ERROR",
-						CliTextRenderer.usageText("command run"),
-						CliExitCodes.USAGE,
-						"command run",
-						invocation.json());
+				if (timeoutMs != null) {
+					throw CliParsing.duplicateOption(token, "command run", json);
 				}
-				timeoutMs = CliParsing.parseIntegerArgument(
-					invocation.tokens().get(++i), "--timeout", "command run", invocation.json());
-				timeoutMs = CliParsing.requireInclusiveRange(
-					timeoutMs,
-					0,
-					emulator.automation.shared.AutomationLimits.MAX_WAIT_MS,
-					"--timeout",
-					"command run",
-					invocation.json());
+				if (i + 1 >= invocation.tokens().size()) {
+					throw usage(json);
+				}
+				int timeout = CliParsing.parseIntegerArgument(
+					invocation.tokens().get(++i), "--timeout", "command run", json);
+				timeoutMs = Integer.valueOf(CliParsing.requireInclusiveRange(
+					timeout, 0, AutomationLimits.MAX_WAIT_MS, "--timeout", "command run", json));
 			} else {
-				throw new KemuCliException(
-					"USAGE_ERROR",
-					CliTextRenderer.usageText("command run"),
-					CliExitCodes.USAGE,
-					"command run",
-					invocation.json());
+				throw usage(json);
 			}
 		}
 
-		if ((id == null && label == null) || expectRevision == null) {
-			throw new KemuCliException(
-				"USAGE_ERROR",
-				CliTextRenderer.usageText("command run"),
-				CliExitCodes.USAGE,
-				"command run",
-				invocation.json());
+		if (id == null && label == null) {
+			throw usage(json);
 		}
 
-		ControllerStatus status = ControllerLifecycle.requireRunningController("command run", invocation.json());
-		Json request = Json.object()
-			.set("waitNextDisplay", waitNextDisplay)
-			.set("timeoutMs", timeoutMs);
+		ControllerStatus status = ControllerLifecycle.requireRunningController("command run", json);
+		Json request = Json.object().set("waitNextDisplay", waitNextDisplay);
+		if (timeoutMs != null) {
+			request.set("timeoutMs", timeoutMs.intValue());
+		}
 		if (id != null) {
 			request.set("id", id.intValue());
 		}
 		if (label != null) {
 			request.set("label", label);
 		}
-		request.set("expectRevision", expectRevision.longValue());
+		if (expectRevision != null) {
+			request.set("expectRevision", expectRevision.longValue());
+		}
 		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
 			ControllerStatusService.controllerClient(status),
 			"app.command.run",
 			request,
 			"command run",
-			invocation.json()));
+			json));
 
-		return new CommandResult("command run", CliTextRenderer.renderCommandRun(payload), payload, invocation.json());
+		return new CommandResult("command run", CliTextRenderer.renderCommandRun(payload), payload, json);
 	}
 }

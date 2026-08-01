@@ -1,5 +1,6 @@
 package emulator.cli;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.*;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.support.KemuPaths;
@@ -30,9 +31,8 @@ final class HelpCommand implements CliCommand {
 			if (target == null) {
 				if (!CliTextRenderer.hasUsageTopic(requestedTopic)) {
 					throw new KemuCliException(
-						"UNKNOWN_COMMAND",
+						CliErrorCodes.UNKNOWN_COMMAND,
 						"Unknown command: " + requestedTopic,
-						CliExitCodes.USAGE,
 						"help",
 						invocation.json());
 				}
@@ -41,9 +41,8 @@ final class HelpCommand implements CliCommand {
 			} else {
 				if (target.path().length() != topicTokens.size()) {
 					throw new KemuCliException(
-						"USAGE_ERROR",
+						CliErrorCodes.USAGE_ERROR,
 						CliTextRenderer.usageText(target.path().asString()),
-						CliExitCodes.USAGE,
 						target.path().asString(),
 						invocation.json());
 				}
@@ -58,6 +57,14 @@ final class HelpCommand implements CliCommand {
 			.set("rootDir", KemuPaths.rootDir().toString());
 		if (topic != null) {
 			payload.set("topic", topic);
+		} else {
+			// Machine-readable command surface straight from the registry, so
+			// tooling does not have to scrape the usage text.
+			Json commands = Json.array();
+			for (String commandPath : registry.commandPaths()) {
+				commands.add(commandPath);
+			}
+			payload.set("commands", commands);
 		}
 
 		return new CommandResult("help", usage, payload, invocation.json());
