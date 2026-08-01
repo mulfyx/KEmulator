@@ -38,7 +38,9 @@ final class OpenOptionParsers {
 			|| "--rms-dir".equals(token)
 			|| "--file-root".equals(token)
 			|| "--reset-state".equals(token)
+			|| "--reset-file-root".equals(token)
 			|| "--wait-ready".equals(token)
+			|| "--open-timeout".equals(token)
 			|| "--worker-xmx".equals(token);
 	}
 
@@ -72,7 +74,9 @@ final class OpenOptionParsers {
 		Path fileRoot = null;
 		String workerXmx = null;
 		boolean resetState = false;
+		boolean resetFileRoot = false;
 		boolean waitReady = false;
+		Integer openTimeoutMs = null;
 		ArrayList<String> startTokens = new ArrayList<String>();
 		for (int i = inputPathIndex + 1; i < tokens.size(); i++) {
 			String token = tokens.get(i);
@@ -111,11 +115,28 @@ final class OpenOptionParsers {
 					throw duplicateOption(token, json);
 				}
 				resetState = true;
+			} else if ("--reset-file-root".equals(token)) {
+				if (resetFileRoot) {
+					throw duplicateOption(token, json);
+				}
+				resetFileRoot = true;
 			} else if ("--wait-ready".equals(token)) {
 				if (waitReady) {
 					throw duplicateOption(token, json);
 				}
 				waitReady = true;
+			} else if ("--open-timeout".equals(token)) {
+				if (i + 1 >= tokens.size()) {
+					throw usageError(json);
+				}
+				requireSingleAssignment(openTimeoutMs, token, json);
+				openTimeoutMs = Integer.valueOf(CliParsing.requireInclusiveRange(
+					CliParsing.parseIntegerArgument(tokens.get(++i), "--open-timeout", "open", json),
+					1,
+					600000,
+					"--open-timeout",
+					"open",
+					json));
 			} else if ("--headless".equals(token) || "--visible".equals(token)) {
 				startTokens.add(token);
 			} else if ("--runtime".equals(token) || "--size".equals(token)) {
@@ -129,6 +150,23 @@ final class OpenOptionParsers {
 			}
 		}
 
+		if (resetFileRoot && !resetState) {
+			throw new KemuCliException(
+				"USAGE_ERROR",
+				"--reset-file-root requires --reset-state.",
+				CliExitCodes.USAGE,
+				"open",
+				json);
+		}
+		if (resetFileRoot && fileRoot == null) {
+			throw new KemuCliException(
+				"USAGE_ERROR",
+				"--reset-file-root requires an explicit --file-root.",
+				CliExitCodes.USAGE,
+				"open",
+				json);
+		}
+
 		return new OpenOptions(
 			inputPath,
 			midlet,
@@ -138,7 +176,9 @@ final class OpenOptionParsers {
 			rmsDir,
 			fileRoot,
 			resetState,
+			resetFileRoot,
 			waitReady,
+			openTimeoutMs,
 			workerXmx);
 	}
 }

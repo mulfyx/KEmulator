@@ -17,11 +17,15 @@ import java.util.regex.PatternSyntaxException;
 import mjson.Json;
 
 final class ControllerWorkerSession {
+	private static final long DEFAULT_OPEN_TIMEOUT_MS = 30000L;
+	private static final long MAX_OPEN_TIMEOUT_MS = 600000L;
+
 	private final AppTargetResolver entryResolver;
 	private final WorkerSupervisor workerSupervisor;
 	private WorkerProcess activeWorker;
 	private WorkerProcess lastWorkerForLogs;
 	private Json lastWorkerFailure;
+	private boolean openInProgress;
 
 	ControllerWorkerSession(AppTargetResolver entryResolver, WorkerSupervisor workerSupervisor) {
 		this.entryResolver = entryResolver;
@@ -129,39 +133,120 @@ final class ControllerWorkerSession {
 		return result;
 	}
 
+	private static Json failureFromException(Exception failure) {
+		if (failure instanceof AutomationException) {
+			AutomationException automationFailure = (AutomationException) failure;
+			Json json = Json.object()
+				.set("code", automationFailure.code)
+				.set("message", automationFailure.getMessage());
+			if (automationFailure.details != null && !automationFailure.details.isNull()) {
+				json.set("details", automationFailure.details.dup());
+			}
+
+			return json;
+		}
+
+		return Json.object()
+			.set("code", AutomationErrorCodes.WORKER_FAILURE)
+			.set("message", String.valueOf(failure.getMessage()));
+	}
+
+	private static long openTimeoutMs(Json request) {
+		long timeoutMs = request.at("openTimeoutMs", DEFAULT_OPEN_TIMEOUT_MS).asLong();
+		if (timeoutMs < 1L || timeoutMs > MAX_OPEN_TIMEOUT_MS) {
+			throw new AutomationException(
+				AutomationErrorCodes.INVALID_REQUEST,
+				"openTimeoutMs must be between 1 and " + MAX_OPEN_TIMEOUT_MS);
+		}
+
+		return timeoutMs;
+	}
+
+	private static String sessionStatus(Json session) {
+		if (session.at("ready", false).asBoolean()) {
+			return "ready";
+		}
+
+		if (session.has("permissionRequest") && !session.at("permissionRequest").isNull()) {
+			return "pending-permission";
+		}
+
+		return "starting";
+	}
+
 	Json openPath(String inputPath, Integer midletIndex, Json request) throws Exception {
 		String normalizedInputPath = TextValues.trimToNull(inputPath);
 		if (normalizedInputPath == null) {
 			throw new AutomationException(AutomationErrorCodes.INVALID_REQUEST, "open path requires a path");
 		}
 
-		AppTarget entry;
+		boolean waitReady = request.at("waitReady", true).asBoolean();
+		long openTimeoutMs = openTimeoutMs(request);
 		synchronized (this) {
 			cleanupDeadWorkerLocked();
-			if (activeWorker != null) {
+			if (activeWorker != null || openInProgress) {
 				throw new AutomationException(AutomationErrorCodes.APP_ALREADY_OPEN, "Another app is already active");
 			}
+
+			openInProgress = true;
 		}
 
-		entry = entryResolver.inspect(
-			Paths.get(normalizedInputPath).toAbsolutePath().normalize());
-		String midletClassName = entryResolver.resolveMidletClass(entry, midletIndex);
-		WorkerProcess worker = workerSupervisor.launchWorker(entry, midletClassName, request);
 		try {
-			Json session = workerSupervisor.waitUntilReady(worker, 30000L);
+			AppTarget entry = entryResolver.inspect(
+				Paths.get(normalizedInputPath).toAbsolutePath().normalize());
+			String midletClassName = entryResolver.resolveMidletClass(entry, midletIndex);
+			WorkerProcess worker = workerSupervisor.launchWorker(entry, midletClassName, request);
 			synchronized (this) {
 				lastWorkerForLogs = null;
 				clearWorkerFailureLocked();
+				// Register the worker while it is still starting so state,
+				// observe, logs, and permission commands can reach it before
+				// startApp() has returned.
 				activeWorker = worker;
 			}
+
+			if (!waitReady) {
+				return Json.object()
+					.set("app", entry.toJson())
+					.set("worker", worker.toJson())
+					.set(
+						"session",
+						Json.object().set("status", "starting").set("ready", false));
+			}
+
+			Json session;
+			try {
+				session = workerSupervisor.waitUntilReady(worker, openTimeoutMs);
+			} catch (Exception failure) {
+				synchronized (this) {
+					if (activeWorker == worker) {
+						activeWorker = null;
+					}
+
+					// Keep the failed worker addressable for logs read/wait
+					// until the next open or an explicit close.
+					lastWorkerForLogs = worker;
+					lastWorkerFailure = failureFromException(failure);
+				}
+
+				workerSupervisor.close(worker);
+				throw failure;
+			}
+
+			if (session.at("ready", false).asBoolean()) {
+				worker.ready = true;
+			}
+
+			session = session.dup().set("status", sessionStatus(session));
 
 			return Json.object()
 				.set("app", entry.toJson())
 				.set("worker", worker.toJson())
 				.set("session", session);
-		} catch (Exception e) {
-			workerSupervisor.close(worker);
-			throw e;
+		} finally {
+			synchronized (this) {
+				openInProgress = false;
+			}
 		}
 	}
 
@@ -198,13 +283,70 @@ final class ControllerWorkerSession {
 		return result;
 	}
 
+	private static final long STARTING_CONNECT_GRACE_MS = 15000L;
+	private static final long STARTING_CONNECT_RETRY_MS = 100L;
+
+	private Json callWorker(WorkerProcess worker, String operation, Json arguments, boolean controlPath)
+		throws Exception {
+		// A freshly spawned worker needs a moment before its socket accepts
+		// connections; retry within a bounded grace instead of failing.
+		long graceDeadline = System.nanoTime()
+			+ TimeUnit.MILLISECONDS.toNanos(STARTING_CONNECT_GRACE_MS);
+		Json result;
+		while (true) {
+			try {
+				result = controlPath
+					? workerSupervisor.callControl(worker, operation, arguments)
+					: workerSupervisor.call(worker, operation, arguments);
+				break;
+			} catch (java.net.ConnectException e) {
+				if (worker.process == null || !worker.process.isAlive()) {
+					throw WorkerDiagnostics.workerFailure(
+						AutomationErrorCodes.WORKER_FAILURE,
+						"Worker exited before accepting commands",
+						worker,
+						null);
+				}
+
+				if (worker.ready) {
+					throw e;
+				}
+
+				if (System.nanoTime() >= graceDeadline) {
+					throw new AutomationException(
+						AutomationErrorCodes.WORKER_STARTING,
+						"Worker is still starting and does not accept commands yet",
+						Json.object().set("worker", worker.toJson()),
+						e);
+				}
+
+				try {
+					Thread.sleep(STARTING_CONNECT_RETRY_MS);
+				} catch (InterruptedException interrupted) {
+					Thread.currentThread().interrupt();
+					throw new AutomationException(
+						AutomationErrorCodes.WORKER_STARTING,
+						"Interrupted while waiting for the starting worker",
+						Json.object().set("worker", worker.toJson()),
+						interrupted);
+				}
+			}
+		}
+
+		if (!worker.ready && result != null && result.isObject() && result.at("ready", false).asBoolean()) {
+			worker.ready = true;
+		}
+
+		return result;
+	}
+
 	Json sessionInfo() throws Exception {
 		WorkerProcess worker = requireActiveWorker();
 
 		return Json.object()
 			.set("app", worker.entry.toJson())
 			.set("worker", worker.toJson())
-			.set("session", workerSupervisor.call(worker, "session", Json.object()));
+			.set("session", callWorker(worker, "session", Json.object(), false));
 	}
 
 	private static String logCursor(WorkerProcess worker, long offset) {
@@ -306,7 +448,14 @@ final class ControllerWorkerSession {
 	}
 
 	Json waitWorkerLog(Json arguments) throws Exception {
-		WorkerProcess worker = requireActiveWorker();
+		WorkerProcess worker;
+		synchronized (this) {
+			cleanupDeadWorkerLocked();
+			worker = activeWorker != null ? activeWorker : lastWorkerForLogs;
+		}
+		if (worker == null) {
+			throw new AutomationException(AutomationErrorCodes.NO_ACTIVE_APP, "No active app");
+		}
 		String regex = arguments.at("regex", "").asString();
 		if (regex.length() == 0) {
 			throw new AutomationException(
@@ -386,19 +535,20 @@ final class ControllerWorkerSession {
 	Json observe(Json arguments) throws Exception {
 		WorkerProcess worker = requireActiveWorker();
 
-		return workerSupervisor.call(
+		return callWorker(
 			worker,
 			"observe",
 			Json.object()
-				.set("includeImage", arguments.at("includeImage", true).asBoolean()));
+				.set("includeImage", arguments.at("includeImage", true).asBoolean()),
+			false);
 	}
 
 	Json proxyWorker(String operation, Json arguments) throws Exception {
-		return workerSupervisor.call(requireActiveWorker(), operation, arguments);
+		return callWorker(requireActiveWorker(), operation, arguments, false);
 	}
 
 	Json proxyWorkerControl(String operation, Json arguments) throws Exception {
-		return workerSupervisor.callControl(requireActiveWorker(), operation, arguments);
+		return callWorker(requireActiveWorker(), operation, arguments, true);
 	}
 
 	Json waitWorkerExit(Json arguments) throws Exception {
@@ -448,7 +598,7 @@ final class ControllerWorkerSession {
 
 	Json captureSnapshot(Json arguments) throws Exception {
 		WorkerProcess worker = requireActiveWorker();
-		Json observe = workerSupervisor.call(worker, "observe", Json.object().set("includeImage", true));
+		Json observe = callWorker(worker, "observe", Json.object().set("includeImage", true), false);
 		String imageBase64 = observe.at("imageBase64") == null
 			? null
 			: observe.at("imageBase64").asString();

@@ -75,7 +75,10 @@ final class ControllerOperationRegistry {
 				return workerSession.currentGame();
 			}
 		});
-		registerCommand("app.open-path", DispatchMode.QUEUED, new ControllerAction() {
+		// PRIORITY: open-path can block for the whole readiness wait and does
+		// its own locking, so queued operations (observe, waits, logs) and
+		// priority permission answers stay available while a worker starts.
+		registerCommand("app.open-path", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				String path = request.at("path") == null ? null : request.at("path").asString();
 				Integer midlet = request.at("midlet") == null
@@ -163,6 +166,21 @@ final class ControllerOperationRegistry {
 		registerCommand("app.text-field.set", DispatchMode.QUEUED, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				return workerSession.proxyWorker("text-field-set", request);
+			}
+		});
+		registerCommand("app.text-box.set", DispatchMode.QUEUED, new ControllerAction() {
+			public Json run(Json request) throws Exception {
+				return workerSession.proxyWorker("text-box-set", request);
+			}
+		});
+		registerCommand("app.screen.resize", DispatchMode.QUEUED, new ControllerAction() {
+			public Json run(Json request) throws Exception {
+				return workerSession.proxyWorker("set-screen-size", request);
+			}
+		});
+		registerCommand("app.screen.rotate", DispatchMode.QUEUED, new ControllerAction() {
+			public Json run(Json request) throws Exception {
+				return workerSession.proxyWorker("rotate-screen", request);
 			}
 		});
 		registerCommand("app.events.read", DispatchMode.QUEUED, new ControllerAction() {

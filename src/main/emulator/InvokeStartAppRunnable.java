@@ -24,6 +24,7 @@ final class InvokeStartAppRunnable implements Runnable {
 					"Fail to launch the MIDlet class:") + " " + Emulator.midletClassName,
 					CustomMethod.getStackTrace(e.getCause())
 			);
+			AutomationWorkerRuntime.onFatalStartupError();
 		}
 	}
 }

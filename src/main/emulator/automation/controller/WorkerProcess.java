@@ -10,6 +10,7 @@ final class WorkerProcess {
 	String pid;
 	Process process;
 	int port;
+	volatile boolean ready;
 	final ReentrantLock protocolLock = new ReentrantLock();
 	long nextRequestId = 1L;
 	long startedAt;
@@ -27,6 +28,7 @@ final class WorkerProcess {
 		return Json.object()
 			.set("pid", pid)
 			.set("alive", process != null && process.isAlive())
+			.set("ready", ready)
 			.set("port", port)
 			.set("startedAt", startedAt)
 			.set("logPath", logPath == null ? null : logPath.toString())
