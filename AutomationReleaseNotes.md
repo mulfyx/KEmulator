@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+- Rebuilt the CLI test layer: `automation/run-cli-tests.sh` builds the bundle
+  once, prepares fixtures once, and runs the pytest suite in
+  `automation/tests/` with a command-coverage gate derived from `kemu help`.
+  It replaces the former bash suites (`test-cli-all-commands.sh`,
+  `test-cli-gauntlet.sh`, `test-cli-regressions.sh`, `test-cli-common.sh`)
+  and the per-fixture build scripts (now `test-fixtures/build-fixtures.sh`).
+
+- Fixed lost suite properties: a worker launched with an explicit MIDlet class
+  (every CLI `open`) now applies the same JAD/MANIFEST merge as the inspector,
+  so `MIDlet.getAppProperty()` sees JAD keys first, MANIFEST fallback keys, and
+  MANIFEST-only keys even when the JAD defines `MIDlet-1`. `inspect` exposes
+  the merged map as `suiteProperties`.
+- Made `--reset-state` safe: an explicit `--file-root` is preserved unless the
+  new `--reset-file-root` opt-in is passed, and every reset root is checked
+  against the launch JAD/JAR before any deletion. Dangerous overlaps fail with
+  the new `STORAGE_OVERLAP` code before mutation.
+- `open` without `--wait-ready` now returns after the worker spawn with
+  `status: "starting"` and the worker identity; `--wait-ready` waits for
+  readiness, returns `status: "pending-permission"` when `startApp()` blocked
+  on a permission request, and honors the new `--open-timeout MS`
+  (default 30000). Worker exit during startup fails `open` immediately with
+  the exit code, a `causeHint` log line, `logTail`, and the log path instead
+  of a fixed 30-second `OPEN_TIMEOUT`.
+- Startup permissions are answerable: a starting worker is registered
+  immediately, so `state`, `observe`, `logs`, `wait permission`, and
+  `permission allow|deny` work before `startApp()` returns. Commands sent
+  before the worker socket accepts connections are retried briefly and then
+  fail with the new `WORKER_STARTING` code. `logs read/wait` keep addressing
+  the last failed worker until the next `open` or an explicit `close`.
+- Automation workers no longer block on modal alert dialogs; alerts are logged
+  and fatal startup errors exit the worker process.
+- Added live `resize WIDTHxHEIGHT` and `rotate` commands: the running worker
+  keeps its PID and MIDlet, `Canvas.sizeChanged()` fires, revision and
+  frameRevision advance, and `--wait-frame` waits for a repaint at the new
+  size.
+- Added `text-box set TEXT [--expect-revision REV]` for the current LCDUI
+  `TextBox`, executed on the LCDUI event thread with maxSize validation and
+  stale-revision protection.
+- Made the memory-card mapping explicit: `open`, `state`, and `observe` report
+  `memoryCard.guestUrl`/`hostPath`, and drive-letter file URLs are
+  case-insensitive (`file:///E:/x` equals `file:///e:/x`). The default
+  `fileconn.dir.memorycard=file:///root/e/` is unchanged.
+- Window icon decoding failures no longer crash the emulator; hosts without an
+  XPM gdk-pixbuf loader log the error and continue without an icon.
+
 - Added schema 3 observations with monotonic revisions, structured LCDUI trees,
   frame revisions, cursor-addressable events, and one canonical nested
   `displayable` representation.
