@@ -44,6 +44,18 @@ public final class CliResponses {
 			result.set("inputPath", payload.at("inputPath"));
 		}
 
+		Json worker = payload.at("worker");
+		if (worker != null && worker.isObject()) {
+			result.set(
+				"worker",
+				Json.object()
+					.set("pid", worker.at("pid", Json.nil()))
+					.set("alive", worker.at("alive", Json.nil()))
+					.set("ready", worker.at("ready", Json.nil()))
+					.set("sessionId", worker.at("sessionId", Json.nil()))
+					.set("logPath", worker.at("logPath", Json.nil())));
+		}
+
 		Json session = payload.at("session");
 		if (session != null && session.isObject()) {
 			for (String key : session.asJsonMap().keySet()) {
@@ -81,6 +93,7 @@ public final class CliResponses {
 			.set("ready", snapshot.at("ready", false).asBoolean())
 			.set("midletStarted", snapshot.at("midletStarted", false).asBoolean())
 			.set("displayable", snapshot.at("displayable"))
+			.set("memoryCard", snapshot.at("memoryCard"))
 			.set("permissionRequest", snapshot.at("permissionRequest"));
 	}
 

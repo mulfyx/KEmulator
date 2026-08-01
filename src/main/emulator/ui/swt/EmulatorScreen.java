@@ -253,6 +253,12 @@ public final class EmulatorScreen implements
 	}
 
 	public void showMessage(final String message) {
+		if (emulator.automation.worker.AutomationWorkerRuntime.isEnabled()) {
+			// A modal dialog in an automation worker can never be dismissed;
+			// keep the message in the worker log instead of blocking.
+			System.err.println("KEmulator alert: " + message);
+			return;
+		}
 		Shell parentShell = ((Property) Emulator.getEmulator().getProperty()).getShell();
 		if (parentShell == null || parentShell.isDisposed() || !parentShell.isVisible()) {
 			parentShell = this.shell;
@@ -268,6 +274,10 @@ public final class EmulatorScreen implements
 	}
 
 	public void showMessage(String title, String detail) {
+		if (emulator.automation.worker.AutomationWorkerRuntime.isEnabled()) {
+			System.err.println("KEmulator alert: " + title + '\n' + detail);
+			return;
+		}
 		Shell parentShell = ((Property) Emulator.getEmulator().getProperty()).getShell();
 		if (parentShell == null || parentShell.isDisposed() || !parentShell.isVisible()) {
 			parentShell = this.shell;
@@ -875,7 +885,12 @@ public final class EmulatorScreen implements
 		});
 		initMenu();
 		setFullscreen(fullscreen);
-		this.shell.setImage(new Image(Display.getCurrent(), this.getClass().getResourceAsStream("/res/icon")));
+		try {
+			this.shell.setImage(new Image(Display.getCurrent(), this.getClass().getResourceAsStream("/res/icon")));
+		} catch (Exception e) {
+			// Icon decoding depends on host gdk-pixbuf loaders; a missing loader must not kill the emulator.
+			System.err.println("Failed to load window icon: " + e);
+		}
 		this.shell.addShellListener(new ShellAdapter() {
 			public void shellDeactivated(ShellEvent e) {
 				try {

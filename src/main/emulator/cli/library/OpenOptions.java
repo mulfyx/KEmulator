@@ -11,7 +11,9 @@ public final class OpenOptions {
 	public final Path rmsDir;
 	public final Path fileRoot;
 	public final boolean resetState;
+	public final boolean resetFileRoot;
 	public final boolean waitReady;
+	public final Integer openTimeoutMs;
 	public final String workerXmx;
 
 	public OpenOptions(
@@ -22,7 +24,9 @@ public final class OpenOptions {
 		Path rmsDir,
 		Path fileRoot,
 		boolean resetState,
+		boolean resetFileRoot,
 		boolean waitReady,
+		Integer openTimeoutMs,
 		String workerXmx) {
 		this.inputPath = inputPath;
 		this.midletIndex = midletIndex;
@@ -31,7 +35,9 @@ public final class OpenOptions {
 		this.rmsDir = rmsDir;
 		this.fileRoot = fileRoot;
 		this.resetState = resetState;
+		this.resetFileRoot = resetFileRoot;
 		this.waitReady = waitReady;
+		this.openTimeoutMs = openTimeoutMs;
 		this.workerXmx = workerXmx;
 	}
 }

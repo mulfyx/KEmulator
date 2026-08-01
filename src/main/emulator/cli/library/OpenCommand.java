@@ -43,7 +43,13 @@ public final class OpenCommand implements CliCommand {
 				args.set("rmsDirExplicit", options.rmsDir != null);
 				args.set("fileRootExplicit", options.fileRoot != null);
 				args.set("resetState", options.resetState);
-				args.set("waitReady", true);
+				args.set("resetFileRoot", options.resetFileRoot);
+				args.set("waitReady", options.waitReady);
+				if (options.openTimeoutMs != null) {
+					args.set("openTimeoutMs", options.openTimeoutMs.intValue());
+					// Aligns the CLI socket read timeout with the readiness wait.
+					args.set("timeoutMs", options.openTimeoutMs.intValue());
+				}
 				args.set("sessionId", KemuPaths.sessionId());
 				if (options.workerXmx != null) {
 					args.set("workerXmx", options.workerXmx);

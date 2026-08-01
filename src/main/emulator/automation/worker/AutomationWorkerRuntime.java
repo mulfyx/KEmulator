@@ -38,6 +38,14 @@ public final class AutomationWorkerRuntime {
 		return WorkerRuntimeState.isEnabled();
 	}
 
+	public static void onFatalStartupError() {
+		if (isEnabled() && !WorkerRuntimeState.isMidletStarted()) {
+			// A worker that cannot start its MIDlet must exit so the
+			// controller can report the failure instead of timing out.
+			System.exit(1);
+		}
+	}
+
 	public static void onMidletStarted(boolean first) {
 		WorkerRuntimeState.setMidletStarted(true);
 		WorkerEventModel.stateChanged(
