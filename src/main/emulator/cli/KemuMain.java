@@ -75,6 +75,9 @@ public final class KemuMain {
 		registry.add(new LcduiControlCommand("choice", "set"));
 		registry.add(new LcduiControlCommand("gauge", "set"));
 		registry.add(new LcduiControlCommand("text-field", "set"));
+		registry.add(new LcduiControlCommand("text-box", "set"));
+		registry.add(new ScreenSizeCommand(false));
+		registry.add(new ScreenSizeCommand(true));
 		registry.add(new CommandRootCommand());
 		registry.add(new RunUiCommand());
 		registry.add(new PermissionCommand());

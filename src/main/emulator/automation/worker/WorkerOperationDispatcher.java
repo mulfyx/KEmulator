@@ -119,6 +119,18 @@ final class WorkerOperationDispatcher {
 			return WorkerLcduiActions.textFieldSet(request);
 		}
 
+		if ("text-box-set".equals(op)) {
+			return WorkerLcduiActions.textBoxSet(request);
+		}
+
+		if ("set-screen-size".equals(op)) {
+			return WorkerScreenActions.resize(request);
+		}
+
+		if ("rotate-screen".equals(op)) {
+			return WorkerScreenActions.rotate(request);
+		}
+
 		if ("answer-permission".equals(op)) {
 			int id = request.at("id", -1).asInteger();
 			boolean allow = request.at("allow", false).asBoolean();

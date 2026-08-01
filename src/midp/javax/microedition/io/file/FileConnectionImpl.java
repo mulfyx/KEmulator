@@ -57,12 +57,15 @@ public class FileConnectionImpl implements FileConnection {
 
 	private static String method216(final String s, final String s2) {
 		String replaceFirst = s;
-		if (s.contains(s2 + ":")) {
+		final String upper = s2.toUpperCase(java.util.Locale.US);
+		// Drive URLs are case-insensitive on handsets: file:///E:/ and
+		// file:///e:/ must resolve to the same host directory.
+		if (s.contains(s2 + ":") || s.contains(upper + ":")) {
 			final File file;
 			if (!(file = new File(FileConnectionImpl.aString441, s2)).exists() || file.isFile()) {
 				file.mkdirs();
 			}
-			replaceFirst = s.replaceFirst(s2 + ":", s2);
+			replaceFirst = s.replaceFirst("[" + s2 + upper + "]:", s2);
 		}
 		return replaceFirst;
 	}

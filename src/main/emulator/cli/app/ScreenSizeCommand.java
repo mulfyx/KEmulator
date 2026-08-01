@@ -12,18 +12,18 @@ import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.output.CliResponses;
+import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
+import java.util.Locale;
 import mjson.Json;
 
-public final class LcduiControlCommand implements CliCommand {
-	private final String group;
-	private final String action;
+public final class ScreenSizeCommand implements CliCommand {
+	private final boolean rotate;
 	private final CommandPath path;
 
-	public LcduiControlCommand(String group, String action) {
-		this.group = group;
-		this.action = action;
-		this.path = CommandPath.of(group, action);
+	public ScreenSizeCommand(boolean rotate) {
+		this.rotate = rotate;
+		this.path = CommandPath.of(rotate ? "rotate" : "resize");
 	}
 
 	public CommandPath path() {
@@ -31,13 +31,13 @@ public final class LcduiControlCommand implements CliCommand {
 	}
 
 	private String commandName() {
-		return group + " " + action;
+		return rotate ? "rotate" : "resize";
 	}
 
 	private KemuCliException usage(boolean json) {
 		return new KemuCliException(
 			"USAGE_ERROR",
-			"Invalid options for " + commandName() + '.',
+			CliTextRenderer.usageText(commandName()),
 			CliExitCodes.USAGE,
 			commandName(),
 			json);
@@ -58,27 +58,33 @@ public final class LcduiControlCommand implements CliCommand {
 	public CommandResult run(CliInvocation invocation) throws Exception {
 		boolean json = invocation.json();
 		Json request = Json.object();
-		int valueIndex = 2;
-		if (invocation.tokens().size() <= valueIndex) {
-			throw usage(json);
+		int optionIndex = 1;
+		if (!rotate) {
+			if (invocation.tokens().size() < 2) {
+				throw usage(json);
+			}
+			String[] parts = invocation.tokens().get(1).toLowerCase(Locale.US).split("x");
+			if (parts.length != 2) {
+				throw usage(json);
+			}
+			int width = CliParsing.parseIntegerArgument(parts[0], "width", commandName(), json);
+			int height = CliParsing.parseIntegerArgument(parts[1], "height", commandName(), json);
+			if (width < 1 || height < 1) {
+				throw usage(json);
+			}
+			request.set("width", width);
+			request.set("height", height);
+			optionIndex = 2;
 		}
-		if ("list".equals(group) && "move".equals(action)) {
-			request.set("direction", invocation.tokens().get(valueIndex));
-		} else if ("text-field".equals(group) || "text-box".equals(group)) {
-			request.set("value", invocation.tokens().get(valueIndex));
-		} else {
-			String key = "gauge".equals(group) ? "value" : "index";
-			request.set(
-				key,
-				CliParsing.parseIntegerArgument(
-					invocation.tokens().get(valueIndex),
-					"<value>",
-					commandName(),
-					json));
-		}
-		for (int i = valueIndex + 1; i < invocation.tokens().size(); i++) {
+
+		for (int i = optionIndex; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
-			if ("--expect-revision".equals(token)) {
+			if ("--wait-frame".equals(token)) {
+				if (request.at("waitFrame", false).asBoolean()) {
+					throw usage(json);
+				}
+				request.set("waitFrame", true);
+			} else if ("--expect-revision".equals(token)) {
 				if (i + 1 >= invocation.tokens().size() || request.has("expectRevision")) {
 					throw usage(json);
 				}
@@ -88,57 +94,33 @@ public final class LcduiControlCommand implements CliCommand {
 					throw usage(json);
 				}
 				int timeout = CliParsing.parseIntegerArgument(
-					invocation.tokens().get(++i),
-					"--timeout",
-					commandName(),
-					json);
+					invocation.tokens().get(++i), "--timeout", commandName(), json);
 				request.set(
 					"timeoutMs",
 					CliParsing.requireInclusiveRange(
-						timeout,
-						0,
-						AutomationLimits.MAX_WAIT_MS,
-						"--timeout",
-						commandName(),
-						json));
-			} else if ("--item-index".equals(token)
-				&& ("choice".equals(group) || "gauge".equals(group) || "text-field".equals(group))) {
-				if (i + 1 >= invocation.tokens().size() || request.has("itemIndex")) {
-					throw usage(json);
-				}
-				request.set(
-					"itemIndex",
-					CliParsing.parseIntegerArgument(
-						invocation.tokens().get(++i),
-						"--item-index",
-						commandName(),
-						json));
-			} else if ("--count".equals(token) && "list".equals(group) && "move".equals(action)) {
-				if (i + 1 >= invocation.tokens().size() || request.has("count")) {
-					throw usage(json);
-				}
-				request.set(
-					"count",
-					CliParsing.parseIntegerArgument(
-						invocation.tokens().get(++i),
-						"--count",
-						commandName(),
-						json));
+						timeout, 0, AutomationLimits.MAX_WAIT_MS, "--timeout", commandName(), json));
 			} else {
 				throw usage(json);
 			}
 		}
+
 		if (!request.has("timeoutMs")) {
 			request.set("timeoutMs", 5000);
 		}
-		String operation = "app." + group + "." + action;
+
 		ControllerStatus status = ControllerLifecycle.requireRunningController(commandName(), json);
 		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
 			ControllerStatusService.controllerClient(status),
-			operation,
+			rotate ? "app.screen.rotate" : "app.screen.resize",
 			request,
 			commandName(),
 			json));
-		return new CommandResult(commandName(), "LCDUI model updated.", payload, json);
+
+		String text = "Screen size: "
+			+ payload.at("width", 0).asInteger() + "x" + payload.at("height", 0).asInteger()
+			+ " (was " + payload.at("oldWidth", 0).asInteger() + "x"
+			+ payload.at("oldHeight", 0).asInteger() + ").";
+
+		return new CommandResult(commandName(), text, payload, json);
 	}
 }

@@ -155,6 +155,26 @@ final class WorkerSessionSnapshot {
 		return result;
 	}
 
+	private static Json memoryCardJson() {
+		String guestUrl = System.getProperty("fileconn.dir.memorycard");
+		String fileRoot = System.getProperty("kemu.file.root");
+		Json json = Json.object().set("guestUrl", guestUrl).set("fileRoot", fileRoot);
+		if (guestUrl != null && fileRoot != null && guestUrl.startsWith("file://")) {
+			String path = guestUrl.substring("file://".length());
+			if (path.startsWith("/")) {
+				path = path.substring(1);
+			}
+			if (path.equals("root")) {
+				path = "";
+			} else if (path.startsWith("root/")) {
+				path = path.substring("root/".length());
+			}
+			json.set("hostPath", new java.io.File(fileRoot, path).getAbsolutePath());
+		}
+
+		return json;
+	}
+
 	static Json build(final boolean includeImage) {
 		return WorkerFrontendThread.call(new Callable<Json>() {
 			public Json call() throws Exception {
@@ -212,6 +232,7 @@ final class WorkerSessionSnapshot {
 				result.set("dataDir", System.getProperty("kemu.data.dir"));
 				result.set("rmsDir", System.getProperty("kemu.rms.dir"));
 				result.set("fileRoot", System.getProperty("kemu.file.root"));
+				result.set("memoryCard", memoryCardJson());
 				result.set("emulatedHeap", Json.nil());
 
 				if (includeImage && screen != null && screen.getScreenImg() != null) {
