@@ -36,6 +36,11 @@ final class CliAppInspector {
 			selectedMidletClass = midlets.get(0).className;
 		}
 
+		java.util.Map<String, String> suiteProperties = new java.util.TreeMap<String, String>();
+		for (String key : inspection.suiteProperties.stringPropertyNames()) {
+			suiteProperties.put(key, inspection.suiteProperties.getProperty(key));
+		}
+
 		return new InspectionResult(
 			inspection.inputPath,
 			inspection.launchPath,
@@ -46,7 +51,8 @@ final class CliAppInspector {
 			inspection.vendor,
 			inspection.version,
 			midlets,
-			selectedMidletClass);
+			selectedMidletClass,
+			suiteProperties);
 	}
 
 	static void validateOpenTarget(InspectionResult inspection, Integer midletIndex, String commandName, boolean json) {

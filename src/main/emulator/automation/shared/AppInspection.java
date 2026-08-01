@@ -2,6 +2,7 @@ package emulator.automation.shared;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Properties;
 
 public final class AppInspection {
 	public final Path inputPath;
@@ -13,6 +14,7 @@ public final class AppInspection {
 	public final String vendor;
 	public final String version;
 	public final List<MidletDescriptor> midlets;
+	public final Properties suiteProperties;
 
 	public AppInspection(
 		Path inputPath,
@@ -23,7 +25,8 @@ public final class AppInspection {
 		String displayName,
 		String vendor,
 		String version,
-		List<MidletDescriptor> midlets) {
+		List<MidletDescriptor> midlets,
+		Properties suiteProperties) {
 		this.inputPath = inputPath;
 		this.launchPath = launchPath;
 		this.jarPath = jarPath;
@@ -33,5 +36,6 @@ public final class AppInspection {
 		this.vendor = vendor;
 		this.version = version;
 		this.midlets = midlets;
+		this.suiteProperties = suiteProperties;
 	}
 }
