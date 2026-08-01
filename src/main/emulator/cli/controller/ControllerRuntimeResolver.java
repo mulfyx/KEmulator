@@ -1,7 +1,7 @@
 package emulator.cli.controller;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.automation.shared.TextValues;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.support.KemuPaths;
 import java.io.File;
@@ -118,9 +118,8 @@ final class ControllerRuntimeResolver {
 		}
 
 		throw new KemuCliException(
-			"MISSING_SWT",
+			CliErrorCodes.MISSING_SWT,
 			"Could not find a Linux SWT runtime jar under home/.",
-			CliExitCodes.RUNTIME,
 			commandName,
 			json);
 	}
@@ -170,9 +169,8 @@ final class ControllerRuntimeResolver {
 			}
 
 			throw new KemuCliException(
-				"UNKNOWN_RUNTIME",
+				CliErrorCodes.UNKNOWN_RUNTIME,
 				"Requested runtime is not available: " + requested,
-				CliExitCodes.USAGE,
 				commandName,
 				json);
 		}
@@ -183,17 +181,15 @@ final class ControllerRuntimeResolver {
 
 		if (candidates.isEmpty()) {
 			throw new KemuCliException(
-				"NO_RUNTIME",
+				CliErrorCodes.NO_RUNTIME,
 				"Could not find a supported KEmulator runtime.",
-				CliExitCodes.RUNTIME,
 				commandName,
 				json);
 		}
 
 		throw new KemuCliException(
-			"AMBIGUOUS_RUNTIME",
+			CliErrorCodes.AMBIGUOUS_RUNTIME,
 			"Multiple runtimes detected. Pass --runtime.",
-			CliExitCodes.RUNTIME,
 			commandName,
 			json);
 	}
@@ -202,18 +198,16 @@ final class ControllerRuntimeResolver {
 		if ("headless".equals(options.mode)) {
 			if (!ControllerStatusService.isLinux()) {
 				throw new KemuCliException(
-					"HEADLESS_UNSUPPORTED",
+					CliErrorCodes.HEADLESS_UNSUPPORTED,
 					"Headless mode is currently supported only on Linux.",
-					CliExitCodes.RUNTIME,
 					commandName,
 					json);
 			}
 
 			if (!isCommandAvailable("xvfb-run")) {
 				throw new KemuCliException(
-					"HEADLESS_DEPENDENCY_MISSING",
+					CliErrorCodes.HEADLESS_DEPENDENCY_MISSING,
 					"Headless mode requires xvfb-run.",
-					CliExitCodes.RUNTIME,
 					commandName,
 					json);
 			}
@@ -224,9 +218,8 @@ final class ControllerRuntimeResolver {
 		if ("visible".equals(options.mode)) {
 			if (!hasX11Display()) {
 				throw new KemuCliException(
-					"DISPLAY_REQUIRED",
+					CliErrorCodes.DISPLAY_REQUIRED,
 					"Visible mode currently requires X11 DISPLAY.",
-					CliExitCodes.RUNTIME,
 					commandName,
 					json);
 			}
@@ -243,9 +236,8 @@ final class ControllerRuntimeResolver {
 		}
 
 		throw new KemuCliException(
-			"DISPLAY_REQUIRED",
+			CliErrorCodes.DISPLAY_REQUIRED,
 			"No display detected and xvfb-run is unavailable.",
-			CliExitCodes.RUNTIME,
 			commandName,
 			json);
 	}

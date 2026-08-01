@@ -89,10 +89,10 @@ def fixtures(release_dir, tmp_path_factory) -> dict:
 
 @pytest.fixture(scope="session")
 def known_commands(release_dir) -> set[str]:
+    """The public command surface, machine-readable from the registry."""
     probe = KemuCli(release_dir, session_id=f"pt-probe-{uuid.uuid4().hex[:8]}")
-    usage = probe.ok("help")["usage"]
-    commands = parse_usage_commands(usage)
-    assert "open" in commands and "observe" in commands, usage
+    commands = set(probe.ok("help")["commands"])
+    assert "open" in commands and "list select" in commands, commands
     return commands
 
 

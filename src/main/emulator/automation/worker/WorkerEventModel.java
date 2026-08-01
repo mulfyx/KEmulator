@@ -56,7 +56,7 @@ final class WorkerEventModel {
 	private static void appendEventLocked(String event, long eventRevision, Json details) {
 		eventCursor++;
 		Json item = Json.object()
-			.set("schemaVersion", 2)
+			.set("schemaVersion", emulator.automation.shared.AutomationSchemas.EVENTS_VERSION)
 			.set("cursor", eventCursor)
 			.set("revision", eventRevision)
 			.set("event", event)

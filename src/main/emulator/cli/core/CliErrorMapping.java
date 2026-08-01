@@ -15,9 +15,9 @@ public final class CliErrorMapping {
 			return CliExitCodes.NOT_FOUND;
 		}
 
-		if ("USAGE_ERROR".equals(code)
-			|| "UNKNOWN_COMMAND".equals(code)
-			|| "UNKNOWN_RUNTIME".equals(code)
+		if (CliErrorCodes.USAGE_ERROR.equals(code)
+			|| CliErrorCodes.UNKNOWN_COMMAND.equals(code)
+			|| CliErrorCodes.UNKNOWN_RUNTIME.equals(code)
 			|| AutomationErrorCodes.UNSUPPORTED_INPUT.equals(code)
 			|| AutomationErrorCodes.MIDLET_SELECTION_REQUIRED.equals(code)
 			|| AutomationErrorCodes.UNKNOWN_MIDLET.equals(code)
@@ -27,7 +27,8 @@ public final class CliErrorMapping {
 			|| AutomationErrorCodes.STALE_REVISION.equals(code)
 			|| AutomationErrorCodes.UNKNOWN_PERMISSION_ID.equals(code)
 			|| AutomationErrorCodes.PERMISSION_ORDER_VIOLATION.equals(code)
-			|| AutomationErrorCodes.STORAGE_OVERLAP.equals(code)) {
+			|| AutomationErrorCodes.STORAGE_OVERLAP.equals(code)
+			|| AutomationErrorCodes.LCDUI_CONTROL_UNAVAILABLE.equals(code)) {
 			return CliExitCodes.USAGE;
 		}
 

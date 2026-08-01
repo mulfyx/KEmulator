@@ -7,6 +7,30 @@ dated. Changes that break existing automation scripts are marked
 
 ## 2026-08-01
 
+- **BREAKING** Contract uniformity sweep. Success is expressed only by the
+  envelope (`result.ok` duplicates removed everywhere, including
+  health/shutdown). Every wait returns `{condition, matched, elapsedMs}` plus
+  condition extras (`exited`/`idle`/`changed` are gone; `worker-exit` always
+  carries `exitCode`). Every mutation returns `{oldRevision, newRevision,
+  elapsedMs, state}`; `text-field set` reports `text`/`caret`/`constraints`/
+  `maxSize` and validates maxSize; `gauge set` validates its domain instead
+  of clamping. The session snapshot lives in exactly one key: `observe` and
+  `state` return `{active, app, state}`, a ready `open` returns `{app,
+  worker, status, state}`. The blocked-on-permission status is the single
+  string `"pending-permission"`. `--expect-revision` is optional for every
+  mutation including `command run`; stale checks report `{expectRevision,
+  currentRevision}`. `screenshot` takes a positional FILE and no longer
+  enforces a `.png` extension. `open` sends one canonical `timeoutMs`.
+  Storage preconditions fail with `APP_ACTIVE` (was `APP_ALREADY_OPEN`);
+  a degraded controller fails `stop` with `CONTROLLER_UNREACHABLE`;
+  `LCDUI_CONTROL_UNAVAILABLE` now exits `2`; socket timeouts surface as
+  `TIMEOUT` instead of `CONTROLLER_UNREACHABLE`. All numeric limits live in
+  one place and are enforced at both the CLI (`USAGE_ERROR`) and the worker
+  (`INVALID_REQUEST`), including `--size`/`resize` bounds `1..4095` and a
+  uniform `--timeout` on every LCDUI setter. `logs read` always returns
+  `lines`; the per-line `offset` and the `logs cursor` `offset` field are
+  replaced by `toOffset`. Long waits no longer block the controller queue.
+  `help --json` returns the machine-readable `commands` list.
 - **BREAKING** Removed the `logs wait` alias; `wait log` is the single
   canonical form. Command groups are now uniform: a known group with a
   missing or unknown subcommand (`kemu logs`, `kemu wait nope`, ...) returns

@@ -11,6 +11,7 @@ def test_logs_cursor_read_wait(kemu, fixtures):
 
     read = kemu.ok("logs", "read")
     assert isinstance(read["lines"], list)
+    assert read["lines"] and "offset" not in read["lines"][0]
     assert any("Mega" in line["line"] or "Get class" in line["line"]
                for line in read["lines"])
 
@@ -44,14 +45,15 @@ def test_screenshot(kemu, fixtures, workdir):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
 
     capture = workdir / "capture.png"
-    result = kemu.ok("screenshot", "--out", str(capture))
+    result = kemu.ok("screenshot", str(capture))
     assert result["saved"] is True
     assert result["path"] == str(capture)
     assert "imageBase64" not in result
     assert png_size(capture) == (240, 320)
 
-    kemu.err("screenshot", "--out", str(workdir / "not-png.jpg"),
-             code="USAGE_ERROR")
+    jpg = workdir / "capture.jpg"
+    assert kemu.ok("screenshot", str(jpg))["saved"] is True
+    assert png_size(jpg) == (240, 320)  # bytes are PNG regardless of extension
     blocked = workdir / "as-dir.png"
     blocked.mkdir()
-    kemu.err("screenshot", "--out", str(blocked), code="SCREENSHOT_WRITE_FAILED")
+    kemu.err("screenshot", str(blocked), code="SCREENSHOT_WRITE_FAILED")

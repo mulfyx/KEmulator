@@ -4,9 +4,13 @@ import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import mjson.Json;
 
 final class ControllerOperationRegistry {
+	private static final long QUEUE_WAIT_MS = 30000L;
+
 	interface ShutdownHandler {
 		void requestShutdown();
 	}
@@ -17,13 +21,18 @@ final class ControllerOperationRegistry {
 
 	private final ControllerWorkerSession workerSession;
 	private final ShutdownHandler shutdownHandler;
-	private final Object requestQueueLock = new Object();
+	private final ReentrantLock requestQueueLock = new ReentrantLock(true);
 	private final Map<String, ControllerOperation> commands = new HashMap<String, ControllerOperation>();
 
 	ControllerOperationRegistry(ControllerWorkerSession workerSession, ShutdownHandler shutdownHandler) {
 		this.workerSession = workerSession;
 		this.shutdownHandler = shutdownHandler;
 		registerCommands();
+	}
+
+	/** Worker op names derive mechanically from controller op names. */
+	private static String workerOpFor(String controllerOp) {
+		return controllerOp.substring("app.".length()).replace('.', '-');
 	}
 
 	private void registerCommand(final String op, final DispatchMode dispatchMode, final ControllerAction action) {
@@ -42,6 +51,15 @@ final class ControllerOperationRegistry {
 		});
 	}
 
+	private void registerWorkerProxy(final String op) {
+		final String workerOp = workerOpFor(op);
+		registerCommand(op, DispatchMode.QUEUED, new ControllerAction() {
+			public Json run(Json request) throws Exception {
+				return workerSession.proxyWorker(workerOp, request);
+			}
+		});
+	}
+
 	Json dispatch(String op, Json request) throws Exception {
 		ControllerOperation command = commands.get(op);
 		if (command == null) {
@@ -52,32 +70,50 @@ final class ControllerOperationRegistry {
 			return command.execute(request);
 		}
 
-		synchronized (requestQueueLock) {
+		// Bounded queueing: a wedged queued operation must produce a
+		// structured error instead of an opaque socket timeout.
+		boolean acquired;
+		try {
+			acquired = requestQueueLock.tryLock(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new AutomationException(
+				AutomationErrorCodes.TIMEOUT, "Interrupted while queued for controller dispatch", null, e);
+		}
+		if (!acquired) {
+			throw new AutomationException(
+				AutomationErrorCodes.TIMEOUT,
+				"Controller request queue is busy",
+				Json.object().set("operation", op).set("queueWaitMs", QUEUE_WAIT_MS));
+		}
+		try {
 			return command.execute(request);
+		} finally {
+			requestQueueLock.unlock();
 		}
 	}
 
 	private void registerCommands() {
 		registerCommand("health", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) {
-				return Json.object().set("ok", true);
+				return Json.object();
 			}
 		});
 		registerCommand("shutdown", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) {
 				shutdownHandler.requestShutdown();
 
-				return Json.object().set("ok", true);
+				return Json.object();
 			}
 		});
-		registerCommand("app.current", DispatchMode.QUEUED, new ControllerAction() {
+		registerCommand("app.current", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) {
 				return workerSession.currentGame();
 			}
 		});
 		// PRIORITY: open-path can block for the whole readiness wait and does
-		// its own locking, so queued operations (observe, waits, logs) and
-		// priority permission answers stay available while a worker starts.
+		// its own locking, so queued operations stay available while a worker
+		// starts.
 		registerCommand("app.open-path", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				String path = request.at("path") == null ? null : request.at("path").asString();
@@ -100,32 +136,7 @@ final class ControllerOperationRegistry {
 		});
 		registerCommand("app.observe", DispatchMode.QUEUED, new ControllerAction() {
 			public Json run(Json request) throws Exception {
-				return workerSession.observe(request == null ? Json.object().set("includeImage", false) : request);
-			}
-		});
-		registerCommand("app.key", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("press-key", request);
-			}
-		});
-		registerCommand("app.tap", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("tap", request);
-			}
-		});
-		registerCommand("app.drag", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("drag", request);
-			}
-		});
-		registerCommand("app.command.run", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("select-command", request);
-			}
-		});
-		registerCommand("app.permission", DispatchMode.PRIORITY, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorkerControl("answer-permission", request);
+				return workerSession.observe(request == null ? Json.object() : request);
 			}
 		});
 		registerCommand("app.screenshot", DispatchMode.QUEUED, new ControllerAction() {
@@ -133,72 +144,46 @@ final class ControllerOperationRegistry {
 				return workerSession.captureSnapshot(request);
 			}
 		});
-		registerCommand("app.wait-condition", DispatchMode.QUEUED, new ControllerAction() {
+		registerCommand("app.permission", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("wait", request);
+				return workerSession.proxyWorkerControl(workerOpFor("app.permission"), request);
 			}
 		});
-		registerCommand("app.wait-worker-exit", DispatchMode.PRIORITY, new ControllerAction() {
+		// PRIORITY: caller-controlled wait duration must not hold the queue.
+		registerCommand("app.wait.condition", DispatchMode.PRIORITY, new ControllerAction() {
+			public Json run(Json request) throws Exception {
+				return workerSession.proxyWorker(workerOpFor("app.wait.condition"), request);
+			}
+		});
+		registerCommand("app.wait.worker-exit", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				return workerSession.waitWorkerExit(request);
 			}
 		});
-		registerCommand("app.list.select", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("list-select", request);
-			}
-		});
-		registerCommand("app.list.move", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("list-move", request);
-			}
-		});
-		registerCommand("app.choice.set", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("choice-set", request);
-			}
-		});
-		registerCommand("app.gauge.set", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("gauge-set", request);
-			}
-		});
-		registerCommand("app.text-field.set", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("text-field-set", request);
-			}
-		});
-		registerCommand("app.text-box.set", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("text-box-set", request);
-			}
-		});
-		registerCommand("app.screen.resize", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("set-screen-size", request);
-			}
-		});
-		registerCommand("app.screen.rotate", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("rotate-screen", request);
-			}
-		});
-		registerCommand("app.events.read", DispatchMode.QUEUED, new ControllerAction() {
-			public Json run(Json request) throws Exception {
-				return workerSession.proxyWorker("events-read", request);
-			}
-		});
-		registerCommand("logs.cursor", DispatchMode.QUEUED, new ControllerAction() {
+		registerWorkerProxy("app.key");
+		registerWorkerProxy("app.pointer.tap");
+		registerWorkerProxy("app.drag");
+		registerWorkerProxy("app.command.run");
+		registerWorkerProxy("app.list.select");
+		registerWorkerProxy("app.list.move");
+		registerWorkerProxy("app.choice.set");
+		registerWorkerProxy("app.gauge.set");
+		registerWorkerProxy("app.text-field.set");
+		registerWorkerProxy("app.text-box.set");
+		registerWorkerProxy("app.screen.resize");
+		registerWorkerProxy("app.screen.rotate");
+		registerWorkerProxy("app.events.read");
+		registerCommand("logs.cursor", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				return workerSession.workerLogCursor();
 			}
 		});
-		registerCommand("logs.read", DispatchMode.QUEUED, new ControllerAction() {
+		registerCommand("logs.read", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				return workerSession.workerLogsRead(request);
 			}
 		});
-		registerCommand("logs.wait", DispatchMode.QUEUED, new ControllerAction() {
+		registerCommand("logs.wait", DispatchMode.PRIORITY, new ControllerAction() {
 			public Json run(Json request) throws Exception {
 				return workerSession.waitWorkerLog(request);
 			}

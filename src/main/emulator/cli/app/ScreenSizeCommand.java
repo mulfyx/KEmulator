@@ -6,7 +6,7 @@ import emulator.cli.controller.ControllerLifecycle;
 import emulator.cli.controller.ControllerStatus;
 import emulator.cli.controller.ControllerStatusService;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -14,7 +14,6 @@ import emulator.cli.core.KemuCliException;
 import emulator.cli.output.CliResponses;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
-import java.util.Locale;
 import mjson.Json;
 
 public final class ScreenSizeCommand implements CliCommand {
@@ -36,23 +35,10 @@ public final class ScreenSizeCommand implements CliCommand {
 
 	private KemuCliException usage(boolean json) {
 		return new KemuCliException(
-			"USAGE_ERROR",
+			CliErrorCodes.USAGE_ERROR,
 			CliTextRenderer.usageText(commandName()),
-			CliExitCodes.USAGE,
 			commandName(),
 			json);
-	}
-
-	private long parseRevision(String value, boolean json) {
-		try {
-			long revision = Long.parseLong(value);
-			if (revision < 0L) {
-				throw usage(json);
-			}
-			return revision;
-		} catch (NumberFormatException e) {
-			throw usage(json);
-		}
 	}
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
@@ -63,17 +49,9 @@ public final class ScreenSizeCommand implements CliCommand {
 			if (invocation.tokens().size() < 2) {
 				throw usage(json);
 			}
-			String[] parts = invocation.tokens().get(1).toLowerCase(Locale.US).split("x");
-			if (parts.length != 2) {
-				throw usage(json);
-			}
-			int width = CliParsing.parseIntegerArgument(parts[0], "width", commandName(), json);
-			int height = CliParsing.parseIntegerArgument(parts[1], "height", commandName(), json);
-			if (width < 1 || height < 1) {
-				throw usage(json);
-			}
-			request.set("width", width);
-			request.set("height", height);
+			int[] size = CliParsing.parseSize(invocation.tokens().get(1), commandName(), json);
+			request.set("width", size[0]);
+			request.set("height", size[1]);
 			optionIndex = 2;
 		}
 
@@ -81,16 +59,24 @@ public final class ScreenSizeCommand implements CliCommand {
 			String token = invocation.tokens().get(i);
 			if ("--wait-frame".equals(token)) {
 				if (request.at("waitFrame", false).asBoolean()) {
-					throw usage(json);
+					throw CliParsing.duplicateOption(token, commandName(), json);
 				}
 				request.set("waitFrame", true);
 			} else if ("--expect-revision".equals(token)) {
-				if (i + 1 >= invocation.tokens().size() || request.has("expectRevision")) {
+				if (request.has("expectRevision")) {
+					throw CliParsing.duplicateOption(token, commandName(), json);
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(json);
 				}
-				request.set("expectRevision", parseRevision(invocation.tokens().get(++i), json));
+				request.set(
+					"expectRevision",
+					CliParsing.parseRevision(invocation.tokens().get(++i), commandName(), json));
 			} else if ("--timeout".equals(token)) {
-				if (i + 1 >= invocation.tokens().size() || request.has("timeoutMs")) {
+				if (request.has("timeoutMs")) {
+					throw CliParsing.duplicateOption(token, commandName(), json);
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(json);
 				}
 				int timeout = CliParsing.parseIntegerArgument(
@@ -102,10 +88,6 @@ public final class ScreenSizeCommand implements CliCommand {
 			} else {
 				throw usage(json);
 			}
-		}
-
-		if (!request.has("timeoutMs")) {
-			request.set("timeoutMs", 5000);
 		}
 
 		ControllerStatus status = ControllerLifecycle.requireRunningController(commandName(), json);

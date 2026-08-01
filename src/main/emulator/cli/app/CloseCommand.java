@@ -1,5 +1,6 @@
 package emulator.cli.app;
 
+import emulator.automation.shared.AutomationErrorCodes;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
 import emulator.cli.output.CliResponses;
@@ -34,9 +35,8 @@ public final class CloseCommand implements CliCommand {
 
 				if (status.degraded || (Boolean.TRUE.equals(status.pidAlive) && !status.running)) {
 					throw new KemuCliException(
-						"CONTROLLER_UNREACHABLE",
+						AutomationErrorCodes.CONTROLLER_UNREACHABLE,
 						"Controller is unreachable. Retry with kemu stop --force.",
-						CliExitCodes.RUNTIME,
 						"close",
 						json);
 				}

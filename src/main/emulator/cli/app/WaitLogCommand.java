@@ -1,12 +1,12 @@
 package emulator.cli.app;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.automation.shared.AutomationLimits;
 import emulator.cli.controller.ControllerCalls;
 import emulator.cli.controller.ControllerLifecycle;
 import emulator.cli.controller.ControllerStatus;
 import emulator.cli.controller.ControllerStatusService;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -21,12 +21,10 @@ public final class WaitLogCommand implements CliCommand {
 	}
 
 	private KemuCliException usage(boolean json) {
-		String commandName = "wait log";
 		return new KemuCliException(
-			"USAGE_ERROR",
-			"Usage: kemu " + commandName + " --regex REGEX [--since CURSOR] [--timeout MS]",
-			CliExitCodes.USAGE,
-			commandName,
+			CliErrorCodes.USAGE_ERROR,
+			emulator.cli.output.CliTextRenderer.usageText("wait log"),
+			"wait log",
 			json);
 	}
 
@@ -40,12 +38,18 @@ public final class WaitLogCommand implements CliCommand {
 		for (int i = 2; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
 			if ("--regex".equals(token)) {
-				if (regex != null || i + 1 >= invocation.tokens().size()) {
+				if (regex != null) {
+					throw CliParsing.duplicateOption(token, "wait log", json);
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(json);
 				}
 				regex = invocation.tokens().get(++i);
 			} else if ("--since".equals(token)) {
-				if (since != null || i + 1 >= invocation.tokens().size()) {
+				if (since != null) {
+					throw CliParsing.duplicateOption(token, "wait log", json);
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(json);
 				}
 				since = invocation.tokens().get(++i);

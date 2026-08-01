@@ -48,7 +48,7 @@ run that bundle's `./kemu.sh`.
 ./kemu.sh --session-id test-1 wait display --kind list --timeout 5000 --json
 ./kemu.sh observe --json
 ./kemu.sh key press FIRE --wait-dispatched --json
-./kemu.sh screenshot --out ./screen.png --json
+./kemu.sh screenshot ./screen.png --json
 ./kemu.sh close --json
 ./kemu.sh stop --force --json
 ```
@@ -71,7 +71,7 @@ controller runtime and should be reserved for cleanup, recovery, or changing
 controller defaults.
 
 `open` without `--wait-ready` returns right after the worker process is
-spawned. The result carries `status: "starting"`, `ready: false`, and the
+spawned. The result carries `status: "starting"`, `state: null`, and the
 worker identity; use `wait worker-ready` (or `observe`) to wait for the MIDlet.
 `open --wait-ready` blocks until one of:
 
@@ -111,33 +111,34 @@ address the failed worker until the next `open` or an explicit `close`.
 - `rms import FILE`
 - `observe`
 - `events read [--since CURSOR] [--jsonl]`
-- `screenshot --out FILE`
+- `screenshot FILE`
 - `wait display [--kind KIND] [--title TITLE] [--selected-index N] [--after-revision REV] [--timeout MS]`
 - `wait worker-ready [--timeout MS]`
 - `wait worker-exit [--timeout MS]`
 - `wait idle [--timeout MS]`
-- `wait frame --after-revision REV [--timeout MS]`
+- `wait frame [--after-revision REV] [--timeout MS]`
 - `wait permission [--name NAME] [--timeout MS]`
 - `wait log --regex REGEX [--since CURSOR] [--timeout MS]`
-- `key press <key> [--wait-dispatched]`
-- `key hold <key> [--duration MS] [--wait-release]`
+- `key press <key> [--duration MS] [--wait-dispatched]`
+- `key hold <key> [--duration MS] [--wait-dispatched] [--wait-release]`
 - `pointer tap <x> <y> [--wait-dispatched]`
 - `drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS]`
-- `list select INDEX [--expect-revision REV]`
-- `list move <up|down> [--count N] [--expect-revision REV]`
-- `choice set INDEX [--item-index INDEX] [--expect-revision REV]`
-- `gauge set VALUE [--item-index INDEX] [--expect-revision REV]`
-- `text-field set TEXT [--item-index INDEX] [--expect-revision REV]`
-- `text-box set TEXT [--expect-revision REV]`
+- `list select INDEX [--expect-revision REV] [--timeout MS]`
+- `list move <up|down> [--count N] [--expect-revision REV] [--timeout MS]`
+- `choice set INDEX [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
+- `gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
+- `text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
+- `text-box set TEXT [--expect-revision REV] [--timeout MS]`
 - `resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS]`
 - `rotate [--expect-revision REV] [--wait-frame] [--timeout MS]`
-- `command run <--id ID|--label LABEL> --expect-revision REV [--wait-next-display] [--timeout MS]`
+- `command run <--id ID|--label LABEL> [--expect-revision REV] [--wait-next-display] [--timeout MS]`
 - `permission allow [id] [--once|--always]`
 - `permission deny [id]`
 
 `--session-id ID` is a global option and may be added to every command.
 
-Run command-specific help with:
+`help --json` additionally returns `result.commands`: the machine-readable
+list of every registered command path. Run command-specific help with:
 
 ```bash
 ./kemu.sh help open --json
@@ -162,8 +163,9 @@ one of the advertised values.
 envelope even when the process exits nonzero. Do not scrape stderr or human text
 for automation control flow.
 
-`--json` may appear anywhere in the command. Documentation examples place it at
-the end for consistency. In shell scripts that use `set -e`, capture stdout and
+`--json` may appear anywhere before a literal `--` marker; after `--` it is
+treated as a plain argument. Documentation examples place it at the end for
+consistency. In shell scripts that use `set -e`, capture stdout and
 the exit code explicitly so a JSON failure response is still available to parse.
 Missing or invalid JSON usually means launcher bootstrap failure, transport
 failure, or a process-level crash.
@@ -222,6 +224,7 @@ Common error codes include:
 - `START_TIMEOUT`
 - `STOP_FAILED`
 - `APP_ALREADY_OPEN`
+- `APP_ACTIVE`
 - `NO_ACTIVE_APP`
 - `APP_INPUT_UNAVAILABLE`
 - `MIDLET_SELECTION_REQUIRED`
@@ -249,52 +252,31 @@ Common error codes include:
 - `3`: path not found
 - `4`: runtime, controller, or internal failure
 
-JSON failures still exit nonzero. Use both the process exit code and
-`error.code` when deciding whether to retry.
+JSON failures still exit nonzero. The exit code is a pure function of
+`error.code`: codes meaning "an identical request can never succeed" (usage,
+unknown ids/keys, stale revisions, `LCDUI_CONTROL_UNAVAILABLE`,
+`STORAGE_OVERLAP`) map to `2`, missing paths to `3`, everything else to `4`.
 
 ## Observing UI State
 
-Use `status` for controller health. Use `state` for a lightweight active-app
-snapshot. `state` still requires a running controller and can return
-`WORKER_FAILURE` if the worker process has died.
+Use `status` for controller health. The session snapshot is one canonical
+object that always lives under the `state` key:
 
-`state` returns:
+- `observe` and `state` return `{active, app, state}`;
+- a ready `open` returns `{app, worker, status, state}` with the same
+  snapshot;
+- error details that carry a snapshot use `lastState`.
 
-- active app metadata
-- `active`
-- `ready`
-- `midletStarted`
-- `title`
-- `displayableKind`
-- `permissionRequest`
+The snapshot (`schemaVersion` currently `3`) contains: monotonic `revision`,
+`frameRevision`, `eventCursor`, `ready`, `midletStarted`, screen `width` and
+`height`, `permissionRequest`, `memoryCard`, storage paths, and one LCDUI
+representation in `state.displayable` with `kind`, `title`, `softkeys`,
+`commands`, and control-specific data for `List`, `Form`, `StringItem`,
+`ChoiceGroup`, `Gauge`, `TextField`, `TextBox`, `Alert`, and `Canvas`.
 
-`observe` returns the richer current MIDlet screen snapshot:
-
-- `schemaVersion` (currently `3`), monotonic `revision`, `frameRevision`, and
-  `eventCursor`
-- readiness and active app metadata
-- screen size
-- displayable kind
-- title
-- softkey labels
-- available LCDUI commands
-- pending permission request
-- `TextBox` text/caret metadata
-- `List` items and selected index
-- structured `displayable` data for `List`, `Form`, `StringItem`,
-  `ChoiceGroup`, `Gauge`, `TextField`, `Alert`, and `Canvas`
-
-`observe` is the preferred command for agents because it returns the current
-controller/app state in one call.
-
-Schema 3 has one LCDUI representation: `result.displayable`. Its nested object
-contains `kind`, `title`, `softkeys`, `commands`, and control-specific state.
-The former top-level duplicates and command snapshots are not emitted.
-
-After `open`, call `observe --json` before the first input even if the open
-response already contains session-like fields. Check `result.active` before
-reading deeper UI fields. Use `observe`, not `state`, when choosing LCDUI
-commands.
+`observe` is the preferred command for agents. `state` still requires a
+running controller and can return `WORKER_FAILURE` if the worker process has
+died. Check `result.active` before reading `result.state`.
 
 ## Revisions And Atomic Commands
 
@@ -303,14 +285,18 @@ snapshot:
 
 ```bash
 state="$(./kemu.sh observe --json)"
-revision="$(printf '%s\n' "$state" | jq -r '.result.revision')"
+revision="$(printf '%s\n' "$state" | jq -r '.result.state.revision')"
 ./kemu.sh command run --label Exit \
   --expect-revision "$revision" \
   --wait-next-display --timeout 5000 --json
 ```
 
-If the display state changed after `observe`, the operation returns
-`STALE_REVISION`. A successful result includes `oldRevision`, `newRevision`,
+`--expect-revision` is optional for every mutation (`command run`, the native
+control setters, `resize`, `rotate`) and recommended for all of them. When it
+is present and stale the operation returns `STALE_REVISION` with
+`{expectRevision, currentRevision}` details and performs no mutation. Every
+mutation result has the uniform shape `{oldRevision, newRevision, elapsedMs,
+state, ...}`. A successful result includes `oldRevision`, `newRevision`,
 `elapsedMs`, the resulting state, and (with `--wait-next-display`) transition
 details. Rendering a frame does not advance the display `revision`;
 `frameRevision` records the newest display revision that has actually been
@@ -319,7 +305,7 @@ LCDUI commands and native control mutations run on the LCDUI event
 thread and return only after their model mutation or callback completes.
 If a callback blocks on an automation-visible permission request,
 `command run` instead returns a successful result with
-`status: "permission-pending"`, `pending: true`, and `permissionRequest`.
+`status: "pending-permission"`, `pending: true`, and `permissionRequest`.
 The command remains suspended on the LCDUI event thread until that request is
 answered; its eventual completion is emitted as `command-finished`.
 When `--wait-next-display` was requested, the pending result sets
@@ -328,7 +314,7 @@ already occurred.
 `--wait-next-display` also recognizes a structured display transition when an
 application reuses one `Displayable` object but replaces its title or contents.
 
-Command entries in `result.displayable.commands` can include `id`, `text`,
+Command entries in `result.state.displayable.commands` can include `id`, `text`,
 `choice`, `selected`, `label`, `type`, and `priority`. Every invocation requires
 the observation revision. After any UI-changing action, call `observe --json`
 again. On `STALE_REVISION` or `UNKNOWN_COMMAND_ID`, re-observe and reselect the
@@ -377,12 +363,19 @@ Useful key names:
 
 Limits and defaults:
 
-- condition waits accept `0..120000` ms and use condition variables or file
-  events rather than polling sleeps
-- `key hold --duration MS` accepts `10..5000` and defaults to `80`.
+- every `--timeout MS` accepts `0..120000` and defaults to `5000`; waits use
+  condition variables or file events rather than polling sleeps. The only
+  exception is `open --open-timeout MS`: `1..600000`, default `30000`.
+- `--duration MS` accepts `10..5000`; `key press` defaults to `80`,
+  `key hold` to `500`.
 - `drag --delay MS` accepts `5..1000` and defaults to `20`.
 - `drag` requires at least two points and an even coordinate count.
 - `pointer tap` and `drag` coordinates must be non-negative integers.
+- screen sizes (`--size`, `resize`) accept `1..4095` per dimension.
+- wait results share one shape: `{condition, matched: true, elapsedMs}` plus
+  condition extras (`state`, `exitCode` for `worker-exit`, `frameRevision`,
+  log `cursor`/`text`). `wait display` requires at least one filter;
+  `wait frame --after-revision` defaults to the current frame revision.
 
 For Canvas games, numeric keypad input is often more reliable than directional
 aliases because many J2ME games document movement as `1` through `9`.
@@ -397,17 +390,17 @@ For Canvas games, use screenshots and an OCR or vision layer when an agent needs
 to understand on-screen text.
 
 ```bash
-./kemu.sh screenshot --out ./screen.png --json
+./kemu.sh screenshot ./screen.png --json
 ```
 
-`--out` must end in `.png`. Parent directories are created automatically. The
-JSON response returns metadata such as `app`, nested `state`, `saved: true`,
-and `path`; it does not embed screenshot bytes. Non-`.png` output paths return
-`USAGE_ERROR`. File creation and write failures return
-`SCREENSHOT_WRITE_FAILED`.
+The output file argument is positional; the bytes are always PNG regardless
+of the file extension. Parent directories are created automatically. The JSON
+response returns metadata such as `app`, nested `state`, `saved: true`, and
+`path`; it does not embed screenshot bytes. File creation and write failures
+return `SCREENSHOT_WRITE_FAILED`.
 
 Use unique screenshot paths for each observation step so an agent does not read
-stale image files. Treat `observe.width` and `observe.height` as the coordinate
+stale image files. Treat `state.width` and `state.height` from `observe` as the coordinate
 space for `tap` and `drag`.
 
 ## Headless And Visible Modes
@@ -468,12 +461,14 @@ rejected request leaves the disk untouched.
   --file-root /tmp/kemu-a/files \
   --reset-state --worker-xmx 64M --wait-ready
 
+./kemu.sh --session-id a close
 ./kemu.sh --session-id a rms export /tmp/a-rms.zip
 ./kemu.sh --session-id a state snapshot /tmp/a-state.zip
 ```
 
-`rms import`, `rms reset`, `state snapshot`, and `state restore` require the
-session app to be closed so the archive is consistent. Archives validate their
+All five storage commands (`rms reset|export|import`, `state
+snapshot|restore`) require the session app to be closed so the archive is
+consistent; an active app fails them with `APP_ACTIVE`. Archives validate their
 schema and paths before replacing session data. RMS index updates use an atomic
 replace so another MIDlet thread cannot observe a truncated index.
 
@@ -500,12 +495,13 @@ same `<fileRoot>/e/x` host path. The effective mapping is visible in
 
 ## Event And Log Cursors
 
-`events read --jsonl` returns structured JSONL events such as
+`events read` uses its own schema (`schemaVersion` `2` on the payload and on
+every event line) and a numeric sequence cursor (`--since SEQ`). Worker log
+cursors are opaque strings (`--since CURSOR`). `events read --jsonl` returns
+structured JSONL events such as
 `display-changed`, `selection-changed`, `command-finished`,
 `input-dispatched`, and `frame-rendered`. Use `eventCursor` or an event
 `cursor` as the next `--since` value.
-
-Worker log cursors are opaque:
 
 ```bash
 cursor="$(./kemu.sh logs cursor --json | jq -r '.result.cursor')"
@@ -546,7 +542,7 @@ Reset a stuck run with:
   from the launch artifacts or pass `--reset-file-root` intentionally.
 - `STALE_REVISION`: run `observe --json` again and retry with the new revision.
 - `SCREENSHOT_WRITE_FAILED`: check the parent directory, permissions, and that
-  `--out` is a file path. A non-`.png` extension is a `USAGE_ERROR`.
+  the output argument is a writable file path.
 
 ## Agent Guidance
 

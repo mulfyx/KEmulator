@@ -1,5 +1,6 @@
 package emulator.cli.app;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
 import emulator.cli.output.CliResponses;
@@ -15,9 +16,8 @@ public final class PermissionCommand implements CliCommand {
 	public CommandResult run(CliInvocation invocation) throws Exception {
 		if (invocation.tokens().size() < 2 || invocation.tokens().size() > 4) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
+				CliErrorCodes.USAGE_ERROR,
 				CliTextRenderer.usageText("permission"),
-				CliExitCodes.USAGE,
 				"permission",
 				invocation.json());
 		}
@@ -29,9 +29,8 @@ public final class PermissionCommand implements CliCommand {
 			allow = false;
 		} else {
 			throw new KemuCliException(
-				"USAGE_ERROR",
+				CliErrorCodes.USAGE_ERROR,
 				CliTextRenderer.usageText("permission"),
-				CliExitCodes.USAGE,
 				"permission",
 				invocation.json());
 		}
@@ -66,9 +65,8 @@ public final class PermissionCommand implements CliCommand {
 
 	private KemuCliException usage(CliInvocation invocation) {
 		return new KemuCliException(
-			"USAGE_ERROR",
+			CliErrorCodes.USAGE_ERROR,
 			CliTextRenderer.usageText("permission"),
-			CliExitCodes.USAGE,
 			"permission",
 			invocation.json());
 	}

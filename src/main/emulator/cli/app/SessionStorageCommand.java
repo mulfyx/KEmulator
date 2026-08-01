@@ -1,10 +1,11 @@
 package emulator.cli.app;
 
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.ControllerCalls;
 import emulator.cli.controller.ControllerStatus;
 import emulator.cli.controller.ControllerStatusService;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
@@ -46,9 +47,8 @@ public final class SessionStorageCommand implements CliCommand {
 			invocation.json());
 		if (current.at("active", false).asBoolean()) {
 			throw new KemuCliException(
-				"APP_ALREADY_OPEN",
+				CliErrorCodes.APP_ACTIVE,
 				"Close the active app before changing or archiving session storage.",
-				CliExitCodes.RUNTIME,
 				commandName(),
 				invocation.json(),
 				current);
@@ -57,9 +57,8 @@ public final class SessionStorageCommand implements CliCommand {
 
 	private KemuCliException storageFailure(CliInvocation invocation, IOException error) {
 		return new KemuCliException(
-			"STORAGE_ERROR",
+			CliErrorCodes.STORAGE_ERROR,
 			error.getMessage(),
-			CliExitCodes.RUNTIME,
 			commandName(),
 			invocation.json());
 	}
@@ -68,9 +67,8 @@ public final class SessionStorageCommand implements CliCommand {
 		int expectedTokens = "reset".equals(action) ? 2 : 3;
 		if (invocation.tokens().size() != expectedTokens) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
-				"Usage: kemu " + commandName() + ("reset".equals(action) ? "" : " FILE"),
-				CliExitCodes.USAGE,
+				CliErrorCodes.USAGE_ERROR,
+				emulator.cli.output.CliTextRenderer.usageText(commandName()),
 				commandName(),
 				invocation.json());
 		}
@@ -80,7 +78,7 @@ public final class SessionStorageCommand implements CliCommand {
 			? SessionStorageArchives.rmsRoots(paths)
 			: SessionStorageArchives.stateRoots(paths);
 		Path archive = expectedTokens == 3
-			? Paths.get(invocation.tokens().get(2)).toAbsolutePath().normalize()
+			? emulator.cli.parse.CliParsing.resolveUserPath(invocation.tokens().get(2))
 			: null;
 		try {
 			if ("reset".equals(action)) {

@@ -1,8 +1,8 @@
 package emulator.cli.controller;
 
+import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.ProcessIdentity;
 import emulator.automation.shared.TextValues;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.support.KemuPaths;
 import java.io.IOException;
@@ -151,9 +151,8 @@ public final class ControllerStatusService {
 		}
 
 		throw new KemuCliException(
-			"CONTROLLER_UNREACHABLE",
+			AutomationErrorCodes.CONTROLLER_UNREACHABLE,
 			"Controller PID identity cannot be verified safely. Refusing to kill PID " + status.pid + '.',
-			CliExitCodes.RUNTIME,
 			commandName,
 			json);
 	}

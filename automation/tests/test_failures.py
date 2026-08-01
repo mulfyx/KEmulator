@@ -37,7 +37,7 @@ def test_failed_open_reports_cause_and_keeps_logs(session, fixtures):
     assert waited["matched"] is True
 
     opened = session.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
-    assert opened["ready"] is True
+    assert opened["status"] == "ready"
     session.close()
     session.err("logs", "read", code="NO_ACTIVE_APP")
 
@@ -48,22 +48,23 @@ def test_open_timeout_is_configurable(session, fixtures):
                           code="OPEN_TIMEOUT")
     assert outcome.details["timeoutMs"] == 150
     opened = session.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
-    assert opened["ready"] is True
+    assert opened["status"] == "ready"
 
 
 def test_killed_worker_reports_failure_and_recovers(session, fixtures, workdir):
     opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
     worker_pid = int(opened["worker"]["pid"])
     os.kill(worker_pid, signal.SIGKILL)
-    time.sleep(0.5)
+    exited = session.ok("wait", "worker-exit", "--timeout", "10000")
+    assert exited["matched"] is True and "exitCode" in exited
 
     capture = workdir / "dead-worker.png"
-    session.err("screenshot", "--out", str(capture), code="WORKER_FAILURE")
+    session.err("screenshot", str(capture), code="WORKER_FAILURE")
     assert not capture.exists()
     assert session.ok("logs", "read")["lines"] is not None
 
     opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    assert opened["displayable"]["title"] == "Mega menu"
+    assert opened["state"]["displayable"]["title"] == "Mega menu"
 
 
 def test_stopped_worker_reports_failure(session, fixtures):
@@ -78,7 +79,7 @@ def test_stopped_worker_reports_failure(session, fixtures):
         except ProcessLookupError:
             pass
     opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    assert opened["displayable"]["title"] == "Mega menu"
+    assert opened["state"]["displayable"]["title"] == "Mega menu"
 
 
 def test_crashing_command_callback(session, fixtures):
@@ -105,17 +106,17 @@ def test_hanging_command_times_out(session, fixtures):
     # The LCDUI thread is stuck forever; close must still tear the worker down.
     session.close()
     opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    assert opened["ready"] is True
+    assert opened["status"] == "ready"
 
 
 def test_worker_self_exit(session, fixtures):
     opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    assert opened["displayable"]["softkeys"]["right"] == "Exit"
+    assert opened["state"]["displayable"]["softkeys"]["right"] == "Exit"
     # EXIT-type commands are softkey-only; the worker dies mid-response, so
     # the key press outcome itself is not asserted.
     session.run("key", "press", "RSK", "--wait-dispatched")
     exited = session.ok("wait", "worker-exit", "--timeout", "10000")
-    assert exited["exited"] is True
+    assert exited["matched"] is True and exited["condition"] == "worker-exit"
     closed = session.ok("close")
     assert closed["closed"] is False
     assert closed["reason"] == "not_running"

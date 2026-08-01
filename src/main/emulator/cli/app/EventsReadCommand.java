@@ -1,16 +1,17 @@
 package emulator.cli.app;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.ControllerCalls;
 import emulator.cli.controller.ControllerLifecycle;
 import emulator.cli.controller.ControllerStatus;
 import emulator.cli.controller.ControllerStatusService;
 import emulator.cli.core.CliCommand;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.output.CliResponses;
+import emulator.cli.parse.CliParsing;
 import mjson.Json;
 
 public final class EventsReadCommand implements CliCommand {
@@ -20,9 +21,8 @@ public final class EventsReadCommand implements CliCommand {
 
 	private KemuCliException usage(boolean json) {
 		return new KemuCliException(
-			"USAGE_ERROR",
-			"Usage: kemu events read [--since CURSOR] [--jsonl] [--json]",
-			CliExitCodes.USAGE,
+			CliErrorCodes.USAGE_ERROR,
+			emulator.cli.output.CliTextRenderer.usageText("events read"),
 			"events read",
 			json);
 	}
@@ -34,19 +34,19 @@ public final class EventsReadCommand implements CliCommand {
 		for (int i = 2; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
 			if ("--since".equals(token)) {
-				if (sinceSet || i + 1 >= invocation.tokens().size()) {
+				if (sinceSet) {
+					throw CliParsing.duplicateOption(token, "events read", invocation.json());
+				}
+				if (i + 1 >= invocation.tokens().size()) {
 					throw usage(invocation.json());
 				}
 				sinceSet = true;
-				try {
-					since = Long.parseLong(invocation.tokens().get(++i));
-				} catch (NumberFormatException error) {
-					throw usage(invocation.json());
+				since = CliParsing.parseLongArgument(
+					invocation.tokens().get(++i), "--since", "events read", invocation.json());
+			} else if ("--jsonl".equals(token)) {
+				if (jsonl) {
+					throw CliParsing.duplicateOption(token, "events read", invocation.json());
 				}
-				if (since < 0L) {
-					throw usage(invocation.json());
-				}
-			} else if ("--jsonl".equals(token) && !jsonl) {
 				jsonl = true;
 			} else {
 				throw usage(invocation.json());

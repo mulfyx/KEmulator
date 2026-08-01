@@ -51,7 +51,9 @@ public final class ControllerClient {
 			&& request.isObject()
 			&& request.has("timeoutMs")
 			&& !request.at("timeoutMs").isNull()) {
-			long requested = request.at("timeoutMs").asLong() + 2000L;
+			// The CLI slack must exceed the controller->worker slack so the
+			// inner deadline always fires first.
+			long requested = request.at("timeoutMs").asLong() + 5000L;
 			if (requested > DEFAULT_READ_TIMEOUT_MS) {
 				return requested > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) requested;
 			}
@@ -146,6 +148,14 @@ public final class ControllerClient {
 				return response.at("result", Json.object());
 			} catch (ControllerException e) {
 				throw e;
+			} catch (java.net.SocketTimeoutException e) {
+				// The controller is alive; the operation outlived the socket
+				// read window. That is a timeout, not unreachability.
+				throw controllerFailure(
+					AutomationErrorCodes.TIMEOUT,
+					"Timed out waiting for controller operation: " + operation,
+					requestContext(operation, Json.object().set("cause", e.getMessage())),
+					e);
 			} catch (IOException e) {
 				throw controllerFailure(
 					AutomationErrorCodes.CONTROLLER_UNREACHABLE,

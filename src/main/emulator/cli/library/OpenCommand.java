@@ -24,7 +24,6 @@ public final class OpenCommand implements CliCommand {
 				ControllerStatus status = ControllerLifecycle.ensureController(options.startOptions, true, "open",
 					json);
 				ControllerClient client = ControllerStatusService.controllerClient(status);
-				ControllerCalls.rejectIfAppAlreadyActive(client, "open", json);
 				Json args = Json.object().set("path", options.inputPath.toString());
 				if (options.midletIndex != null) {
 					args.set("midlet", options.midletIndex.intValue());
@@ -46,8 +45,6 @@ public final class OpenCommand implements CliCommand {
 				args.set("resetFileRoot", options.resetFileRoot);
 				args.set("waitReady", options.waitReady);
 				if (options.openTimeoutMs != null) {
-					args.set("openTimeoutMs", options.openTimeoutMs.intValue());
-					// Aligns the CLI socket read timeout with the readiness wait.
 					args.set("timeoutMs", options.openTimeoutMs.intValue());
 				}
 				args.set("sessionId", KemuPaths.sessionId());

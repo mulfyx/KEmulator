@@ -1,5 +1,6 @@
 package emulator.cli.app;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.automation.shared.AutomationLimits;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
@@ -18,7 +19,7 @@ public final class DragCommand implements CliCommand {
 	public CommandResult run(CliInvocation invocation) throws Exception {
 		if (invocation.tokens().size() < 5) {
 			throw new KemuCliException(
-				"USAGE_ERROR", CliTextRenderer.usageText("drag"), CliExitCodes.USAGE, "drag", invocation.json());
+				CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText("drag"), "drag", invocation.json());
 		}
 
 		Integer delay = null;
@@ -29,14 +30,13 @@ public final class DragCommand implements CliCommand {
 			if ("--delay".equals(token)) {
 				if (sawDelay) {
 					throw new KemuCliException(
-						"USAGE_ERROR", "Duplicate option: --delay.", CliExitCodes.USAGE, "drag", invocation.json());
+						CliErrorCodes.USAGE_ERROR, "Duplicate option: --delay.", "drag", invocation.json());
 				}
 
 				if (i + 1 >= invocation.tokens().size()) {
 					throw new KemuCliException(
-						"USAGE_ERROR",
+						CliErrorCodes.USAGE_ERROR,
 						CliTextRenderer.usageText("drag"),
-						CliExitCodes.USAGE,
 						"drag",
 						invocation.json());
 				}
@@ -54,7 +54,7 @@ public final class DragCommand implements CliCommand {
 
 		if (coords.size() < 4 || coords.size() % 2 != 0) {
 			throw new KemuCliException(
-				"USAGE_ERROR", CliTextRenderer.usageText("drag"), CliExitCodes.USAGE, "drag", invocation.json());
+				CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText("drag"), "drag", invocation.json());
 		}
 
 		Json points = Json.array();

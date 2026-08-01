@@ -40,14 +40,13 @@ public final class CliApp {
 				tokens.add(arg);
 				continue;
 			}
-			if ("--json".equals(arg)) {
+			if (!literal && "--json".equals(arg)) {
 				json = true;
 			} else if (!literal && "--session-id".equals(arg)) {
 				if (sessionId != null || i + 1 >= args.length) {
 					throw new KemuCliException(
-						"USAGE_ERROR",
+						CliErrorCodes.USAGE_ERROR,
 						"Expected one value for --session-id.",
-						CliExitCodes.USAGE,
 						null,
 						json);
 				}
@@ -59,9 +58,8 @@ public final class CliApp {
 		if (sessionId != null) {
 			if (!sessionId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) {
 				throw new KemuCliException(
-					"USAGE_ERROR",
+					CliErrorCodes.USAGE_ERROR,
 					"Invalid --session-id. Use 1-64 letters, digits, dot, underscore, or dash.",
-					CliExitCodes.USAGE,
 					null,
 					json);
 			}
@@ -73,7 +71,9 @@ public final class CliApp {
 			return helpCommand.run(invocation);
 		}
 
-		if (isHelpToken(tokens.get(tokens.size() - 1))) {
+		int literalMarker = tokens.indexOf("--");
+		boolean helpSuffixIsLiteral = literalMarker >= 0 && literalMarker < tokens.size() - 1;
+		if (!helpSuffixIsLiteral && isHelpToken(tokens.get(tokens.size() - 1))) {
 			List<String> topicTokens = new ArrayList<String>(tokens.subList(0, tokens.size() - 1));
 			CliCommand exact = registry.resolveExact(topicTokens);
 			if (exact == null) {
@@ -83,17 +83,15 @@ public final class CliApp {
 				CliCommand candidate = registry.resolve(topicTokens);
 				if (candidate != null) {
 					throw new KemuCliException(
-						"USAGE_ERROR",
+						CliErrorCodes.USAGE_ERROR,
 						CliTextRenderer.usageText(candidate.path().asString()),
-						CliExitCodes.USAGE,
 						candidate.path().asString(),
 						json);
 				}
 
 				throw new KemuCliException(
-					"UNKNOWN_COMMAND",
+					CliErrorCodes.UNKNOWN_COMMAND,
 					"Unknown command: " + topicTokens.get(0),
-					CliExitCodes.USAGE,
 					topicTokens.get(0),
 					json);
 			}
@@ -108,11 +106,11 @@ public final class CliApp {
 			String group = tokens.get(0);
 			if (CliTextRenderer.hasUsageTopic(group)) {
 				throw new KemuCliException(
-					"USAGE_ERROR", CliTextRenderer.usageText(group), CliExitCodes.USAGE, group, json);
+					CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText(group), group, json);
 			}
 
 			throw new KemuCliException(
-				"UNKNOWN_COMMAND", "Unknown command: " + tokens.get(0), CliExitCodes.USAGE, tokens.get(0), json);
+				CliErrorCodes.UNKNOWN_COMMAND, "Unknown command: " + tokens.get(0), tokens.get(0), json);
 		}
 
 		return command.run(invocation);

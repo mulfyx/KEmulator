@@ -21,7 +21,7 @@ public final class ObserveCommand implements CliCommand {
 			? ControllerCalls.callController(
 				client, "app.observe", Json.object().set("includeImage", false), "observe", invocation.json())
 			: Json.object();
-		Json payload = CliResponses.buildObservePayload(current, session);
+		Json payload = CliResponses.buildSnapshotPayload(current, session);
 
 		return new CommandResult("observe", CliTextRenderer.renderObserve(payload), payload, invocation.json());
 	}

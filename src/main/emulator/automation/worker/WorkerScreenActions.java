@@ -10,8 +10,7 @@ import java.util.concurrent.TimeUnit;
 import mjson.Json;
 
 final class WorkerScreenActions {
-	// EventQueue.sizeChanged() packs each dimension into 12 bits.
-	private static final int MAX_DIMENSION = 4095;
+	private static final int MAX_DIMENSION = emulator.automation.shared.AutomationLimits.MAX_DIMENSION;
 
 	private WorkerScreenActions() {
 	}
@@ -26,20 +25,6 @@ final class WorkerScreenActions {
 		}
 
 		return screen;
-	}
-
-	private static void checkRevision(Json request) {
-		if (!request.has("expectRevision") || request.at("expectRevision").isNull()) {
-			return;
-		}
-		long expected = request.at("expectRevision").asLong();
-		long current = WorkerEventModel.revision();
-		if (expected != current) {
-			throw new AutomationException(
-				AutomationErrorCodes.STALE_REVISION,
-				"Stale revision: " + expected + ", current: " + current,
-				Json.object().set("expectedRevision", expected).set("currentRevision", current));
-		}
 	}
 
 	private static void validateDimension(int value, String name) {
@@ -57,7 +42,7 @@ final class WorkerScreenActions {
 		Json applied = WorkerFrontendThread.call(new Callable<Json>() {
 			public Json call() {
 				IScreen screen = requireScreen();
-				checkRevision(request);
+				RevisionGuard.check(request);
 				int oldWidth = screen.getWidth();
 				int oldHeight = screen.getHeight();
 				int width = requestedWidth == null ? oldHeight : requestedWidth.intValue();

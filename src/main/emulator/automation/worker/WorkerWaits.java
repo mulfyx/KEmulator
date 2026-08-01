@@ -151,7 +151,7 @@ final class WorkerWaits {
 						.set("afterRevision", afterRevision)
 						.set("timeoutMs", timeoutMs)
 						.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
-						.set("lastFrameRevision", WorkerEventModel.frameRevision())
+						.set("frameRevision", WorkerEventModel.frameRevision())
 						.set("lastState", WorkerSessionSnapshot.build(false)));
 			}
 		} catch (InterruptedException e) {
@@ -167,7 +167,8 @@ final class WorkerWaits {
 			.set("matched", true)
 			.set("afterRevision", afterRevision)
 			.set("frameRevision", WorkerEventModel.frameRevision())
-			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
+			.set("state", WorkerSessionSnapshot.build(false));
 	}
 
 	static Json waitForNextDisplay(
@@ -183,7 +184,8 @@ final class WorkerWaits {
 			if (currentIdentity != oldIdentity
 				|| !currentDisplaySignature.equals(oldDisplaySignature)) {
 				return Json.object()
-					.set("changed", true)
+					.set("condition", "next-display")
+					.set("matched", true)
 					.set("displayIdentity", currentIdentity)
 					.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
 					.set("state", state);
@@ -226,7 +228,7 @@ final class WorkerWaits {
 	static Json readEvents(Json request) {
 		long since = request.at("since", 0L).asLong();
 		return Json.object()
-			.set("schemaVersion", 2)
+			.set("schemaVersion", emulator.automation.shared.AutomationSchemas.EVENTS_VERSION)
 			.set("since", since)
 			.set("cursor", WorkerEventModel.cursor())
 			.set("events", WorkerEventModel.eventsSince(since));

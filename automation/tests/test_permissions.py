@@ -2,7 +2,7 @@
 
 
 def _pending_permission_id(kemu):
-    request = kemu.observe()["permissionRequest"]
+    request = kemu.state_of()["permissionRequest"]
     assert request is not None
     return int(request["id"])
 
@@ -12,7 +12,7 @@ def test_allow_and_deny(kemu, fixtures):
 
     pending = kemu.run_command("Ask camera", wait_next=False)
     assert pending["pending"] is True
-    assert pending["status"] == "permission-pending"
+    assert pending["status"] == "pending-permission"
     assert isinstance(pending["permissionRequest"], dict)
     camera_id = _pending_permission_id(kemu)
     assert camera_id == int(pending["permissionRequest"]["id"])
@@ -36,13 +36,15 @@ def test_permission_ordering_race(kemu, fixtures):
     kemu.run_command("Ask permission race", wait_next=False)
     kemu.ok("wait", "permission", "--timeout", "5000")
 
+    # The race fixture issues two requests from racing threads, so their ids
+    # may enqueue in either order; only the head may be answered.
     head_id = _pending_permission_id(kemu)
-    second_id = head_id + 1
-    kemu.err("permission", "deny", str(second_id),
+    kemu.err("permission", "deny", str(head_id + 100),
              code="PERMISSION_ORDER_VIOLATION")
     kemu.ok("permission", "allow", str(head_id))
     kemu.ok("wait", "permission", "--timeout", "5000")
-    assert _pending_permission_id(kemu) == second_id
+    second_id = _pending_permission_id(kemu)
+    assert second_id != head_id
 
     before = kemu.revision()
     kemu.ok("permission", "deny", str(second_id))
@@ -61,13 +63,13 @@ def test_allow_always_persists_for_worker(kemu, fixtures):
     completed = kemu.run_command("Ask camera", wait_next=False)
     assert "pending" not in completed  # no prompt: policy persists for worker
     assert kemu.title() == "Camera allowed"
-    assert kemu.observe()["permissionRequest"] is None
+    assert kemu.state_of()["permissionRequest"] is None
 
 
 def test_startup_permission_async_open(kemu, fixtures):
     opened = kemu.ok("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless")
     assert opened["status"] == "starting"
-    assert opened["ready"] is False
+    assert opened["state"] is None
     assert isinstance(opened["worker"]["pid"], str)
 
     kemu.ok("wait", "permission", "--timeout", "30000")
@@ -81,7 +83,7 @@ def test_startup_permission_wait_ready_returns_pending(kemu, fixtures):
     opened = kemu.ok("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless",
                      "--wait-ready", "--open-timeout", "60000")
     assert opened["status"] == "pending-permission"
-    assert isinstance(opened["permissionRequest"], dict)
+    assert isinstance(opened["state"]["permissionRequest"], dict)
 
     kemu.ok("permission", "deny")
     kemu.wait_title("startup permission denied", timeout_ms=15000)

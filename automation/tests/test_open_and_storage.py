@@ -26,6 +26,7 @@ def _write_card_root(fixtures, root: Path) -> Path:
 
 def test_open_variants(kemu, fixtures):
     opened = kemu.open_ready(fixtures["DASH_PREFIXED_JAR"])
+    assert opened["status"] == "ready"
     assert opened["app"]["displayName"] == "Command Fixture"
     kemu.close()
 
@@ -36,7 +37,7 @@ def test_open_variants(kemu, fixtures):
 
     opened = kemu.open_ready(fixtures["MULTI_MIDLET_JAR"], "--midlet", "2")
     assert opened["app"]["midletName"] == "Mutable Title Fixture"
-    assert opened["displayable"]["title"] == "Mutable menu"
+    assert opened["state"]["displayable"]["title"] == "Mutable menu"
     kemu.close()
 
     opened = kemu.open_ready(fixtures["BOM_MANIFEST_JAR"])
@@ -44,7 +45,7 @@ def test_open_variants(kemu, fixtures):
     kemu.close()
 
     opened = kemu.open_ready(fixtures["PARENT_RELATIVE_JAD"])
-    assert opened["displayable"]["title"] == "Parent Relative Target Menu"
+    assert opened["state"]["displayable"]["title"] == "Parent Relative Target Menu"
     kemu.err("open", fixtures["COMMAND_FIXTURE_JAR"], "--headless",
              code="APP_ALREADY_OPEN")
 
@@ -66,7 +67,7 @@ def test_worker_sees_merged_suite_properties(kemu, fixtures):
     ]
     for env_key, extra, title in cases:
         opened = kemu.open_ready(fixtures[env_key], *extra)
-        assert opened["displayable"]["title"] == title, env_key
+        assert opened["state"]["displayable"]["title"] == title, env_key
         kemu.close()
 
 
@@ -79,7 +80,7 @@ def test_reset_state_preserves_explicit_file_root(kemu, fixtures, workdir):
                      "--data-dir", str(workdir / "card-data"),
                      "--file-root", str(card_root),
                      "--reset-state", "--wait-ready")
-    assert opened["ready"] is True
+    assert opened["state"]["ready"] is True
     kemu.close()
 
     outcome = kemu.err("open", str(jad), "--headless",
@@ -118,11 +119,11 @@ def test_memory_card_mapping(kemu, fixtures, workdir):
                      "--data-dir", str(workdir / "memcard-data"),
                      "--file-root", str(memcard_root),
                      "--reset-state", "--wait-ready")
-    assert opened["memoryCard"]["guestUrl"] == "file:///root/e/"
-    assert opened["memoryCard"]["hostPath"] == str(memcard_root / "e")
+    assert opened["state"]["memoryCard"]["guestUrl"] == "file:///root/e/"
+    assert opened["state"]["memoryCard"]["hostPath"] == str(memcard_root / "e")
     kemu.wait_title("WROTE file:///root/e/probe.txt", timeout_ms=15000)
     state = kemu.ok("state")
-    assert state["memoryCard"]["hostPath"] == str(memcard_root / "e")
+    assert state["state"]["memoryCard"]["hostPath"] == str(memcard_root / "e")
     kemu.close()
     assert (memcard_root / "e" / "probe.txt").read_bytes() == b"probe"
 
@@ -141,14 +142,14 @@ def test_rms_archives_and_state_snapshot(kemu, fixtures, workdir):
     def open_and_read_count() -> int:
         opened = kemu.ok("open", jar, "--headless",
                          "--data-dir", str(data_dir), "--wait-ready")
-        title = opened["displayable"]["title"]
+        title = opened["state"]["displayable"]["title"]
         assert title.startswith("RMS count "), title
         return int(title.rsplit(" ", 1)[1])
 
     kemu.ok("open", jar, "--headless", "--data-dir", str(data_dir),
             "--reset-state", "--wait-ready")
     assert kemu.title() == "RMS count 1"
-    kemu.err("rms", "reset", code="APP_ALREADY_OPEN")
+    kemu.err("rms", "reset", code="APP_ACTIVE")
     kemu.close()
 
     assert open_and_read_count() == 2

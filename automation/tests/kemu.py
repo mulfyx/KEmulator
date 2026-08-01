@@ -1,8 +1,8 @@
 """Thin wrapper around kemu.sh --json for the CLI test suite.
 
-Every invocation records the exercised public command so the coverage gate
-(test_zz_coverage.py) can compare the exercised set against the command
-surface advertised by `kemu help --json`.
+The wrapper enforces the envelope contract on every call and records the
+exercised public commands (from the registry list served by `help --json`)
+so the coverage gate can compare exercised vs advertised.
 """
 
 from __future__ import annotations
@@ -15,18 +15,19 @@ from pathlib import Path
 
 # Shared across every KemuCli instance in one pytest session.
 EXERCISED_COMMANDS: set[str] = set()
+EXERCISED_OK_COMMANDS: set[str] = set()
 
 _USAGE_LINE = re.compile(r"^\s*kemu\s+(.*)$")
 _WORD = re.compile(r"^[a-z][a-z0-9-]*$")
 _ALTERNATION = re.compile(r"^<([a-z0-9|-]+)>$")
 
+ENVELOPE_KEYS = {"ok", "command", "result"}
+ERROR_ENVELOPE_KEYS = {"ok", "command", "error"}
+FORBIDDEN_RESULT_KEYS = {"ok", "error", "command"}
+
 
 def parse_usage_commands(usage_text: str) -> set[str]:
-    """Extract the public command surface from `help --json` usage text.
-
-    `kemu wait <worker-ready|worker-exit|idle> ...` expands into one command
-    per alternative. Parsing stops at the first placeholder/option token.
-    """
+    """Command tokens scraped from usage text (doc-sync check only)."""
     commands: set[str] = set()
     for line in usage_text.splitlines():
         match = _USAGE_LINE.match(line)
@@ -50,14 +51,13 @@ def parse_usage_commands(usage_text: str) -> set[str]:
     return commands
 
 
-def record_exercised(args: tuple[str, ...], known_commands: set[str]) -> None:
-    """Record the longest known command prefix of the invocation."""
-    lowered = [a for a in args]
-    for length in range(min(3, len(lowered)), 0, -1):
-        candidate = " ".join(lowered[:length])
+def match_known_command(args: tuple[str, ...], known_commands: set[str]) -> str | None:
+    """The longest known command prefix of the invocation, if any."""
+    for length in range(min(3, len(args)), 0, -1):
+        candidate = " ".join(args[:length])
         if candidate in known_commands:
-            EXERCISED_COMMANDS.add(candidate)
-            return
+            return candidate
+    return None
 
 
 class KemuError(AssertionError):
@@ -94,16 +94,63 @@ class KemuCli:
         self.session_id = session_id
         self.known_commands = known_commands or set()
 
-    def run(self, *args: str, timeout: int = 240) -> KemuResult:
-        argv = ["./kemu.sh", "--session-id", self.session_id, *args, "--json"]
-        proc = subprocess.run(
+    def run_raw(self, *args: str, json_mode: bool = True,
+                timeout: int = 240) -> subprocess.CompletedProcess:
+        # Global flags go before the command tokens so a literal `--` in the
+        # command arguments cannot swallow them.
+        argv = ["./kemu.sh", "--session-id", self.session_id]
+        if json_mode:
+            argv.append("--json")
+        argv.extend(args)
+        return subprocess.run(
             argv,
             cwd=self.release_dir,
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-        record_exercised(tuple(args), self.known_commands)
+
+    def _assert_envelope(self, args: tuple[str, ...], envelope: dict,
+                         exit_code: int) -> None:
+        if envelope.get("ok"):
+            if set(envelope) != ENVELOPE_KEYS:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: success envelope keys "
+                    f"{sorted(envelope)}, expected {sorted(ENVELOPE_KEYS)}")
+            result = envelope.get("result")
+            if not isinstance(result, dict):
+                raise KemuError(
+                    f"kemu {' '.join(args)}: result is not an object: {result!r}")
+            leaked = FORBIDDEN_RESULT_KEYS & set(result)
+            if leaked:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: envelope keys leaked into result: "
+                    f"{sorted(leaked)}")
+            if exit_code != 0:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: ok envelope but exit {exit_code}")
+        else:
+            if set(envelope) != ERROR_ENVELOPE_KEYS:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: error envelope keys "
+                    f"{sorted(envelope)}, expected {sorted(ERROR_ENVELOPE_KEYS)}")
+            error = envelope.get("error")
+            if not isinstance(error, dict) or not error.get("code") \
+                    or not error.get("message"):
+                raise KemuError(
+                    f"kemu {' '.join(args)}: malformed error object: {error!r}")
+            if "details" in error and error["details"] is None:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: error.details must be omitted or non-null")
+            if exit_code == 0:
+                raise KemuError(
+                    f"kemu {' '.join(args)}: error envelope but exit 0")
+
+    def run(self, *args: str, timeout: int = 240) -> KemuResult:
+        proc = self.run_raw(*args, timeout=timeout)
+        matched = match_known_command(tuple(args), self.known_commands)
+        if matched:
+            EXERCISED_COMMANDS.add(matched)
         raw = proc.stdout.strip()
         try:
             envelope = json.loads(raw)
@@ -112,6 +159,9 @@ class KemuCli:
                 f"kemu {' '.join(args)}: invalid JSON on stdout "
                 f"(exit {proc.returncode}): {raw[:400]!r} stderr={proc.stderr[:400]!r}"
             ) from failure
+        self._assert_envelope(tuple(args), envelope, proc.returncode)
+        if envelope.get("ok") and matched:
+            EXERCISED_OK_COMMANDS.add(matched)
         return KemuResult(
             ok=bool(envelope.get("ok")),
             command=envelope.get("command"),
@@ -128,10 +178,6 @@ class KemuCli:
                 f"kemu {' '.join(args)}: expected ok, got "
                 f"{outcome.code}: {outcome.error.get('message')}"
             )
-        if outcome.exit_code != 0:
-            raise KemuError(
-                f"kemu {' '.join(args)}: ok envelope but exit {outcome.exit_code}"
-            )
         if command is not None and outcome.command != command:
             raise KemuError(
                 f"kemu {' '.join(args)}: expected command {command!r}, "
@@ -146,19 +192,10 @@ class KemuCli:
                 f"kemu {' '.join(args)}: expected {code}, got success: "
                 f"{outcome.raw[:400]}"
             )
-        if outcome.exit_code == 0:
-            raise KemuError(
-                f"kemu {' '.join(args)}: error envelope but exit 0"
-            )
         if outcome.code != code:
             raise KemuError(
                 f"kemu {' '.join(args)}: expected {code}, got {outcome.code}: "
                 f"{outcome.error.get('message')}"
-            )
-        # Error envelope shape contract.
-        if not outcome.command or not outcome.error.get("message"):
-            raise KemuError(
-                f"kemu {' '.join(args)}: malformed error envelope: {outcome.raw[:400]}"
             )
         return outcome
 
@@ -167,11 +204,14 @@ class KemuCli:
     def observe(self) -> dict:
         return self.ok("observe")
 
+    def state_of(self, observation: dict | None = None) -> dict:
+        return (observation or self.observe())["state"]
+
     def revision(self, observation: dict | None = None) -> int:
-        return int((observation or self.observe())["revision"])
+        return int(self.state_of(observation)["revision"])
 
     def title(self, observation: dict | None = None) -> str | None:
-        displayable = (observation or self.observe()).get("displayable") or {}
+        displayable = self.state_of(observation).get("displayable") or {}
         return displayable.get("title")
 
     def open_ready(self, path: str, *extra: str) -> dict:
@@ -193,7 +233,8 @@ class KemuCli:
             pass
 
     def command_id(self, observation: dict, wanted_text: str) -> int:
-        commands = (observation.get("displayable") or {}).get("commands") or []
+        commands = (self.state_of(observation).get("displayable") or {}) \
+            .get("commands") or []
         for command in commands:
             text = command.get("text") or command.get("label") or ""
             if text == wanted_text:

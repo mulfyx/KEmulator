@@ -12,7 +12,8 @@ final class WorkerProcess {
 	int port;
 	volatile boolean ready;
 	final ReentrantLock protocolLock = new ReentrantLock();
-	long nextRequestId = 1L;
+	// Control-path calls bypass protocolLock, so the id must be atomic.
+	final java.util.concurrent.atomic.AtomicLong nextRequestId = new java.util.concurrent.atomic.AtomicLong(1L);
 	long startedAt;
 	Path logPath;
 	Path readyPath;

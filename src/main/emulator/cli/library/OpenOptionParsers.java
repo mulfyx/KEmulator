@@ -1,7 +1,7 @@
 package emulator.cli.library;
 
+import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.ControllerLifecycle;
-import emulator.cli.core.CliExitCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
@@ -14,12 +14,12 @@ final class OpenOptionParsers {
 	}
 
 	private static KemuCliException usageError(boolean json) {
-		return new KemuCliException("USAGE_ERROR", CliTextRenderer.usageText("open"), CliExitCodes.USAGE, "open", json);
+		return new KemuCliException(CliErrorCodes.USAGE_ERROR, CliTextRenderer.usageText("open"), "open", json);
 	}
 
 	private static KemuCliException duplicateOption(String option, boolean json) {
 		return new KemuCliException(
-			"USAGE_ERROR", "Duplicate option: " + option + '.', CliExitCodes.USAGE, "open", json);
+			CliErrorCodes.USAGE_ERROR, "Duplicate option: " + option + '.', "open", json);
 	}
 
 	private static void requireSingleAssignment(Object value, String option, boolean json) {
@@ -132,8 +132,8 @@ final class OpenOptionParsers {
 				requireSingleAssignment(openTimeoutMs, token, json);
 				openTimeoutMs = Integer.valueOf(CliParsing.requireInclusiveRange(
 					CliParsing.parseIntegerArgument(tokens.get(++i), "--open-timeout", "open", json),
-					1,
-					600000,
+					emulator.automation.shared.AutomationLimits.MIN_OPEN_TIMEOUT_MS,
+					emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS,
 					"--open-timeout",
 					"open",
 					json));
@@ -152,17 +152,15 @@ final class OpenOptionParsers {
 
 		if (resetFileRoot && !resetState) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
+				CliErrorCodes.USAGE_ERROR,
 				"--reset-file-root requires --reset-state.",
-				CliExitCodes.USAGE,
 				"open",
 				json);
 		}
 		if (resetFileRoot && fileRoot == null) {
 			throw new KemuCliException(
-				"USAGE_ERROR",
+				CliErrorCodes.USAGE_ERROR,
 				"--reset-file-root requires an explicit --file-root.",
-				CliExitCodes.USAGE,
 				"open",
 				json);
 		}
