@@ -89,7 +89,8 @@ public final class CliTextRenderer {
 			+ "  kemu logs wait --regex REGEX [--since CURSOR] [--timeout MS] [--json]\n"
 			+ "  kemu inspect <path> [--json]\n"
 			+ "  kemu open <path> [--data-dir DIR] [--rms-dir DIR] [--file-root DIR]"
-			+ " [--reset-state] [--worker-xmx SIZE] [--wait-ready]"
+			+ " [--reset-state] [--reset-file-root] [--worker-xmx SIZE]"
+			+ " [--wait-ready] [--open-timeout MS]"
 			+ " [--headless|--visible] [--runtime " + runtimeUsage + "] [--size WxH] [--json]\n"
 			+ "  kemu close [--json]\n"
 			+ "  kemu state [--json]\n"
@@ -102,6 +103,7 @@ public final class CliTextRenderer {
 			+ " [--after-revision REV] [--timeout MS] [--json]\n"
 			+ "  kemu wait <worker-ready|worker-exit|idle> [--timeout MS] [--json]\n"
 			+ "  kemu wait frame --after-revision REV [--timeout MS] [--json]\n"
+			+ "  kemu wait permission [--name NAME] [--timeout MS] [--json]\n"
 			+ "  kemu wait log --regex REGEX [--since CURSOR] [--timeout MS] [--json]\n"
 			+ "  kemu key press <key> [--wait-dispatched] [--json]\n"
 			+ "  kemu key hold <key> [--duration MS] [--wait-release] [--json]\n"
@@ -111,6 +113,9 @@ public final class CliTextRenderer {
 			+ "  kemu choice set N [--item-index INDEX] [--expect-revision REV] [--json]\n"
 			+ "  kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--json]\n"
 			+ "  kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--json]\n"
+			+ "  kemu text-box set TEXT [--expect-revision REV] [--json]\n"
+			+ "  kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]\n"
+			+ "  kemu rotate [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]\n"
 			+ "  kemu command run <--id ID|--label LABEL> --expect-revision REV"
 			+ " [--wait-next-display] [--timeout MS] [--json]\n"
 			+ "  kemu permission <allow [--once|--always]|deny> [id] [--json]\n"
@@ -145,7 +150,8 @@ public final class CliTextRenderer {
 		if ("open".equals(topic))
 			return "kemu open <path> [--midlet N] [--headless|--visible] [--runtime " + runtimeUsageChoices()
 				+ "] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR]"
-				+ " [--reset-state] [--worker-xmx SIZE] [--wait-ready] [--json]";
+				+ " [--reset-state] [--reset-file-root] [--worker-xmx SIZE]"
+				+ " [--wait-ready] [--open-timeout MS] [--json]";
 		if ("close".equals(topic))
 			return "kemu close [--json]";
 		if ("state".equals(topic))
@@ -204,6 +210,12 @@ public final class CliTextRenderer {
 			return "kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--json]";
 		if ("text-field".equals(topic) || "text-field set".equals(topic))
 			return "kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--json]";
+		if ("text-box".equals(topic) || "text-box set".equals(topic))
+			return "kemu text-box set TEXT [--expect-revision REV] [--json]";
+		if ("resize".equals(topic))
+			return "kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
+		if ("rotate".equals(topic))
+			return "kemu rotate [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
 		if ("command".equals(topic))
 			return "kemu command run <--id ID|--label LABEL> --expect-revision REV"
 				+ " [--wait-next-display] [--timeout MS] [--json]";
@@ -363,6 +375,10 @@ public final class CliTextRenderer {
 						? "(unknown)"
 						: app.at("displayName").asString())
 				.append('\n');
+		}
+
+		if (payload.has("status") && !payload.at("status").isNull()) {
+			out.append("Status: ").append(payload.at("status").asString()).append('\n');
 		}
 
 		out.append("Ready: ").append(payload.at("ready", false).asBoolean()).append('\n');

@@ -44,6 +44,7 @@ public class TextBox extends Screen {
 	public void setString(String newText)
 	{
 		impl.setString(newText);
+		emulator.automation.worker.AutomationWorkerRuntime.onDisplayStateChanged("textbox-changed");
 	}
 
 	/**

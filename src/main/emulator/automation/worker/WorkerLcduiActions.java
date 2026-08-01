@@ -237,6 +237,51 @@ final class WorkerLcduiActions {
 		});
 	}
 
+	static Json textBoxSet(final Json request) {
+		Json result = onEventThread(request, new Action() {
+			public Json run() {
+				Displayable current = currentDisplayable();
+				if (!(current instanceof javax.microedition.lcdui.TextBox)) {
+					throw new AutomationException(
+						AutomationErrorCodes.LCDUI_CONTROL_UNAVAILABLE,
+						"Current displayable is not a TextBox",
+						Json.object().set(
+							"currentKind",
+							current == null ? "none" : current.getClass().getName()));
+				}
+				javax.microedition.lcdui.TextBox textBox = (javax.microedition.lcdui.TextBox) current;
+				String value = request.at("value", "").asString();
+				if (value.length() > textBox.getMaxSize()) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"Text exceeds the TextBox maxSize",
+						Json.object()
+							.set("maxSize", textBox.getMaxSize())
+							.set("textLength", value.length()));
+				}
+				long oldRevision = WorkerEventModel.revision();
+				try {
+					textBox.setString(value);
+				} catch (RuntimeException e) {
+					throw new AutomationException(
+						AutomationErrorCodes.INVALID_REQUEST,
+						"TextBox rejected the text: " + e.getMessage(),
+						Json.object().set("constraints", textBox.getConstraints()),
+						e);
+				}
+				return Json.object()
+					.set("oldRevision", oldRevision)
+					.set("newRevision", WorkerEventModel.revision())
+					.set("text", textBox.getString())
+					.set("caret", textBox.getCaretPosition())
+					.set("constraints", textBox.getConstraints())
+					.set("maxSize", textBox.getMaxSize());
+			}
+		});
+		result.set("state", WorkerSessionSnapshot.build(false));
+		return result;
+	}
+
 	static Json textFieldSet(final Json request) {
 		return onEventThread(request, new Action() {
 			public Json run() {
