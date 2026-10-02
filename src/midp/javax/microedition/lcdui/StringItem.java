@@ -34,8 +34,11 @@ public class StringItem extends Item {
 	}
 
 	public void setText(final String aString25) {
-		this.text = aString25 == null ? "" : aString25;
+		String text = aString25 == null ? "" : aString25;
+		boolean changed = !text.equals(this.text);
+		this.text = text;
 		layoutForm();
+		if (changed) formContentChanged();
 	}
 
 	public int getAppearanceMode() {

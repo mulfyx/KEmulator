@@ -46,11 +46,11 @@ run that bundle's `./kemu.sh`.
   --data-dir /tmp/kemu-test-1 --reset-state --worker-xmx 64M \
   --wait-ready --json
 ./kemu.sh --session-id test-1 wait display --kind list --timeout 5000 --json
-./kemu.sh observe --json
-./kemu.sh key press FIRE --wait-dispatched --json
-./kemu.sh screenshot ./screen.png --json
-./kemu.sh close --json
-./kemu.sh stop --force --json
+./kemu.sh --session-id test-1 observe --json
+./kemu.sh --session-id test-1 key press FIRE --wait-dispatched --json
+./kemu.sh --session-id test-1 screenshot ./screen.png --json
+./kemu.sh --session-id test-1 close --json
+./kemu.sh --session-id test-1 stop --force --json
 ```
 
 For `.jad` files, `MIDlet-Jar-URL` should resolve to a local relative JAR path.

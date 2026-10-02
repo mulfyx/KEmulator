@@ -7,6 +7,8 @@ controller sessions instead of the shared one.
 import os
 import signal
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +16,63 @@ import pytest
 @pytest.fixture()
 def session(kemu_factory):
     return kemu_factory()
+
+
+def _worker_port(pid):
+    inodes = set()
+    for descriptor in Path(f"/proc/{pid}/fd").iterdir():
+        try:
+            target = os.readlink(descriptor)
+        except FileNotFoundError:
+            continue
+        if target.startswith("socket:["):
+            inodes.add(target[8:-1])
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        for line in Path(table).read_text().splitlines()[1:]:
+            fields = line.split()
+            if fields[3] == "0A" and fields[9] in inodes:
+                return int(fields[1].split(":")[1], 16)
+    pytest.fail(f"worker {pid} has no listening socket")
+
+
+def _worker_connections(port):
+    connections = set()
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        for line in Path(table).read_text().splitlines()[1:]:
+            fields = line.split()
+            if fields[3] == "01" and int(fields[1].split(":")[1], 16) == port:
+                connections.add((fields[1], fields[2]))
+    return connections
+
+
+def test_parallel_wait_allows_command_to_satisfy_condition(session, fixtures):
+    opened = session.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
+    assert opened["state"]["displayable"]["title"] == "Mega menu"
+    worker_port = _worker_port(opened["worker"]["pid"])
+    previous_connections = _worker_connections(worker_port)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        waiter = executor.submit(
+            session.run, "wait", "display", "--title", "Canvas ready",
+            "--timeout", "6000", timeout=15, oneshot=True)
+        # A new worker connection proves the wait has entered the protocol
+        # path before the command, without relying on a scheduling sleep.
+        deadline = time.monotonic() + 5
+        while not (_worker_connections(worker_port) - previous_connections):
+            if waiter.done():
+                pytest.fail(f"wait ended before connecting: {waiter.result().raw}")
+            assert time.monotonic() < deadline, "wait never connected to worker"
+
+        started = time.monotonic()
+        session.ok("command", "run", "--label", "Open canvas",
+                   "--timeout", "1000", timeout=15, oneshot=True)
+        command_elapsed = time.monotonic() - started
+        waited = waiter.result(timeout=10)
+
+    assert waited.ok, waited.raw
+    assert waited["matched"] is True
+    assert waited["state"]["displayable"]["title"] == "Canvas ready"
+    assert command_elapsed < 3, f"command blocked behind wait for {command_elapsed:.1f}s"
 
 
 def test_failed_open_reports_cause_and_keeps_logs(session, fixtures):

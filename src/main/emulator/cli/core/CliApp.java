@@ -71,32 +71,17 @@ public final class CliApp {
 			return helpCommand.run(invocation);
 		}
 
-		int literalMarker = tokens.indexOf("--");
-		boolean helpSuffixIsLiteral = literalMarker >= 0 && literalMarker < tokens.size() - 1;
-		if (!helpSuffixIsLiteral && isHelpToken(tokens.get(tokens.size() - 1))) {
+		String lastToken = tokens.get(tokens.size() - 1);
+		if (!tokens.contains("--") && isHelpToken(lastToken)) {
 			List<String> topicTokens = new ArrayList<String>(tokens.subList(0, tokens.size() - 1));
 			CliCommand exact = registry.resolveExact(topicTokens);
-			if (exact == null) {
-				if (CliTextRenderer.hasUsageTopic(join(topicTokens))) {
-					return helpCommand.run(new CliInvocation(topicTokens, json));
-				}
-				CliCommand candidate = registry.resolve(topicTokens);
-				if (candidate != null) {
-					throw new KemuCliException(
-						CliErrorCodes.USAGE_ERROR,
-						CliTextRenderer.usageText(candidate.path().asString()),
-						candidate.path().asString(),
-						json);
-				}
-
-				throw new KemuCliException(
-					CliErrorCodes.UNKNOWN_COMMAND,
-					"Unknown command: " + topicTokens.get(0),
-					topicTokens.get(0),
-					json);
+			boolean group = registry.resolve(topicTokens) == null
+				&& CliTextRenderer.hasUsageTopic(join(topicTokens));
+			// A bare "help" can be a command value. Keep the shorthand only
+			// for groups; command help uses the explicit --help/-h flags.
+			if (group || (exact != null && !"help".equals(lastToken))) {
+				return helpCommand.run(new CliInvocation(topicTokens, json));
 			}
-
-			return helpCommand.run(new CliInvocation(topicTokens, json));
 		}
 
 		CliCommand command = registry.resolve(tokens);

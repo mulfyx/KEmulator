@@ -24,6 +24,7 @@ public final class FormControlsFixtureMidlet extends MIDlet
 	implements CommandListener, ItemStateListener {
 	private final Command toListCommand = new Command("To list", Command.SCREEN, 1);
 	private final Command backCommand = new Command("Back", Command.BACK, 2);
+	private final Command loadCommand = new Command("Load", Command.SCREEN, 3);
 
 	private Form form;
 	private List list;
@@ -51,6 +52,7 @@ public final class FormControlsFixtureMidlet extends MIDlet
 			form.append(field);
 			form.append(when);
 			form.addCommand(toListCommand);
+			form.addCommand(loadCommand);
 			form.setCommandListener(this);
 			form.setItemStateListener(this);
 		}
@@ -77,6 +79,25 @@ public final class FormControlsFixtureMidlet extends MIDlet
 	}
 
 	public void commandAction(Command command, Displayable displayable) {
+		if (command == loadCommand) {
+			status.setText("Waiting");
+			new Thread(new Runnable() {
+				public void run() {
+					try {
+						Thread.sleep(1200L);
+					} catch (InterruptedException interrupted) {
+						return;
+					}
+					Display.getDisplay(FormControlsFixtureMidlet.this).callSerially(new Runnable() {
+						public void run() {
+							status.setText("Loaded");
+						}
+					});
+				}
+			}).start();
+			return;
+		}
+
 		if (command == toListCommand) {
 			if (list == null) {
 				list = new List("Pick list", List.IMPLICIT);

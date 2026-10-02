@@ -147,6 +147,26 @@ def test_form_choice_gauge_text_field(kemu, fixtures):
     kemu.err("choice", "set", "9", code="INVALID_REQUEST")
 
 
+def test_async_form_string_item_advances_revision(kemu, fixtures):
+    kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
+    kemu.run_command("Load", wait_next=False)
+    observation = kemu.observe()
+    assert kemu.state_of(observation)["displayable"]["items"][0]["text"] == "Waiting"
+    waiting_revision = kemu.revision(observation)
+    to_list_id = kemu.command_id(observation, "To list")
+
+    waited = kemu.ok("wait", "display",
+                     "--after-revision", str(waiting_revision),
+                     "--timeout", "5000")
+    assert waited["matched"] is True
+    loaded = kemu.observe()
+    assert kemu.revision(loaded) > waiting_revision
+    assert kemu.state_of(loaded)["displayable"]["items"][0]["text"] == "Loaded"
+    kemu.err("command", "run", "--id", str(to_list_id),
+             "--expect-revision", str(waiting_revision), code="STALE_REVISION")
+    assert kemu.title() == "Controls form"
+
+
 def test_text_box_set(kemu, fixtures):
     kemu.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
     observation = kemu.observe()

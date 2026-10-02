@@ -1,6 +1,7 @@
 package javax.microedition.lcdui;
 
 import emulator.Emulator;
+import emulator.automation.worker.AutomationWorkerRuntime;
 import emulator.lcdui.LCDUIUtils;
 
 import java.util.Vector;
@@ -55,8 +56,10 @@ public abstract class Item {
 	}
 
 	public void setLabel(String label) {
+		boolean changed = this.label == null ? label != null : !this.label.equals(label);
 		this.label = label;
 		layoutForm();
+		if (changed) formContentChanged();
 	}
 
 	public String getLabel() {
@@ -224,6 +227,14 @@ public abstract class Item {
 	void layoutForm() {
 		if (screen != null && screen instanceof Form) {
 			((Form) screen).queueLayout(this);
+		}
+	}
+
+	void formContentChanged() {
+		if (!AutomationWorkerRuntime.isEnabled() || !(screen instanceof Form)) return;
+		Display display = Emulator.getCurrentDisplay();
+		if (display != null && display.getCurrent() == screen) {
+			AutomationWorkerRuntime.onDisplayStateChanged("form-item-changed");
 		}
 	}
 

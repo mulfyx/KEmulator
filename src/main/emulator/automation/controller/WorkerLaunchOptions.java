@@ -249,6 +249,7 @@ final class WorkerLaunchOptions {
 			runtimeRoot,
 			"fileRoot",
 			explicitlyConfigured(request, "fileRoot"));
+		List<String> jvmOptions = jvmOptions(request);
 		if (request.at("resetState", false).asBoolean()) {
 			boolean fileRootExplicit = explicitlyConfigured(request, "fileRoot");
 			boolean resetFileRoot = !fileRootExplicit || request.at("resetFileRoot", false).asBoolean();
@@ -292,6 +293,6 @@ final class WorkerLaunchOptions {
 		Files.createDirectories(fileRoot);
 		Files.createDirectories(dataDir.resolve("tmp"));
 		String sessionId = request.at("sessionId", "default").asString();
-		return new WorkerLaunchOptions(dataDir, rmsDir, fileRoot, jvmOptions(request), sessionId);
+		return new WorkerLaunchOptions(dataDir, rmsDir, fileRoot, jvmOptions, sessionId);
 	}
 }

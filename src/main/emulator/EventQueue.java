@@ -8,6 +8,7 @@ import net.rim.device.api.system.Application;
 import javax.microedition.lcdui.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.Vector;
@@ -26,6 +27,7 @@ public final class EventQueue implements Runnable {
 	public static final int EVENT_ITEM_STATE = 20;
 	public static final int EVENT_HIDE = 21;
 	public static final int EVENT_TRACKED_COMMAND = 22;
+	private static final int EVENT_TRACKED_LIFECYCLE = 23;
 
 	public interface CommandDispatchListener {
 		void commandFinished(Throwable failure);
@@ -44,12 +46,39 @@ public final class EventQueue implements Runnable {
 		}
 	}
 
+	private static final class LifecycleAction {
+		private final boolean pause;
+		private final CountDownLatch done = new CountDownLatch(1);
+		private int pendingCallbacks = 1;
+		private Throwable failure;
+
+		private LifecycleAction(boolean pause) {
+			this.pause = pause;
+		}
+
+		private synchronized void callbackStarted() {
+			pendingCallbacks++;
+		}
+
+		private synchronized void callbackFinished(Throwable failure) {
+			if (this.failure == null) {
+				this.failure = failure;
+			}
+			if (--pendingCallbacks == 0) {
+				done.countDown();
+			}
+		}
+	}
+
 	boolean running;
 	private int[] events;
 	private int count;
 	private final Vector eventArguments = new Vector();
 	private final Thread eventThread;
-	private boolean paused;
+	private volatile boolean paused;
+	private final Object lifecycleLock = new Object();
+	private LifecycleAction pendingLifecycle;
+	private volatile LifecycleAction queuedLifecycle;
 	private final Object callbackLock = new Object();
 	private boolean alive;
 	private final Object eventLock = new Object();
@@ -228,6 +257,49 @@ public final class EventQueue implements Runnable {
 
 	public boolean isPaused() {
 		return paused;
+	}
+
+	/** Returns whether the state changed, after all lifecycle callbacks finish. */
+	public boolean setPausedAndWait(boolean pause, long timeoutMs)
+		throws InterruptedException, TimeoutException {
+		long deadline = System.nanoTime()
+			+ TimeUnit.MILLISECONDS.toNanos(Math.max(0L, timeoutMs));
+		synchronized (lifecycleLock) {
+			// A timed-out request can still be in flight. Wait for it before
+			// deciding whether a retry needs another lifecycle event.
+			if (pendingLifecycle != null) {
+				awaitLifecycle(pendingLifecycle, deadline);
+				pendingLifecycle = null;
+			}
+			if (paused == pause) {
+				return false;
+			}
+
+			LifecycleAction action = new LifecycleAction(pause);
+			pendingLifecycle = action;
+			// Only one tracked lifecycle action can be in flight. Keep its
+			// payload separate from the arguments of normal LCDUI events.
+			queuedLifecycle = action;
+			// Resume must wake the paused queue, but its caller still waits
+			// for startApp and showNotify rather than this admission flag.
+			if (!pause) {
+				paused = false;
+			}
+			queue(EVENT_TRACKED_LIFECYCLE);
+			awaitLifecycle(action, deadline);
+			pendingLifecycle = null;
+			if (action.failure != null) {
+				throw new RuntimeException("MIDlet lifecycle callback failed", action.failure);
+			}
+			return true;
+		}
+	}
+
+	private void awaitLifecycle(LifecycleAction action, long deadline)
+		throws InterruptedException, TimeoutException {
+		if (!action.done.await(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)) {
+			throw new TimeoutException("MIDlet lifecycle callback did not finish");
+		}
 	}
 
 	public void sizeChanged(int x, int y) {
@@ -502,6 +574,12 @@ public final class EventQueue implements Runnable {
 							((Canvas) d)._invokeShowNotify();
 							break;
 						}
+						case EVENT_TRACKED_LIFECYCLE: {
+							LifecycleAction action = queuedLifecycle;
+							queuedLifecycle = null;
+							dispatchLifecycle(action);
+							break;
+						}
 						case EVENT_INPUT: {
 							if (inputsCount <= 0) break;
 							int[] e;
@@ -592,6 +670,48 @@ public final class EventQueue implements Runnable {
 				}
 			}
 		} catch (InterruptedException ignored) {}
+	}
+
+	private void dispatchLifecycle(final LifecycleAction action) {
+		Throwable failure = null;
+		try {
+			Displayable current = getCurrent();
+			if (action.pause) {
+				if (current instanceof Canvas) ((Canvas) current)._invokeHideNotify();
+				paused = true;
+				if (AppSettings.startAppOnResume) {
+					Emulator.getMIDlet().invokePauseApp();
+				}
+			} else {
+				if (AppSettings.startAppOnResume) {
+					Thread startThread = new Thread(new Runnable() {
+						public void run() {
+							Throwable failure = null;
+							try {
+								new InvokeStartAppRunnable(false).run();
+							} catch (Throwable throwable) {
+								failure = throwable;
+							} finally {
+								action.callbackFinished(failure);
+							}
+						}
+					}, "KEmulator-ResumeApp");
+					startThread.setPriority(5);
+					action.callbackStarted();
+					try {
+						startThread.start();
+					} catch (Throwable throwable) {
+						action.callbackFinished(throwable);
+						throw throwable;
+					}
+				}
+				if (current instanceof Canvas) ((Canvas) current)._invokeShowNotify();
+			}
+		} catch (Throwable throwable) {
+			failure = throwable;
+		} finally {
+			action.callbackFinished(failure);
+		}
 	}
 
 	private void processSerialEvent() {

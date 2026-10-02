@@ -24,6 +24,60 @@ def test_help_topic_for_every_public_command(kemu, known_commands):
         assert f"kemu {command.split()[0]}" in result["usage"], command
 
 
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+def test_help_suffixes(kemu, oneshot):
+    for topic in ("status", "open", "text-field set", "text-box set"):
+        for flag in ("--help", "-h"):
+            result = kemu.ok(*topic.split(), flag, command="help", oneshot=oneshot)
+            assert result["topic"] == topic
+    for group in ("key", "wait"):
+        for suffix in ("help", "--help", "-h"):
+            result = kemu.ok(group, suffix, command="help", oneshot=oneshot)
+            assert result["topic"] == group
+
+
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+@pytest.mark.parametrize("control", ["text-field", "text-box"])
+def test_help_is_a_text_value(kemu, fixtures, control, oneshot):
+    if control == "text-field":
+        kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
+    else:
+        kemu.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
+        kemu.run_command("Open editor")
+
+    result = kemu.ok(control, "set", "help", command=f"{control} set",
+                     oneshot=oneshot)
+    assert result["text"] == "help"
+    displayable = kemu.state_of()["displayable"]
+    if control == "text-field":
+        assert displayable["items"][3]["text"] == "help"
+    else:
+        assert displayable["text"] == "help"
+
+
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+@pytest.mark.parametrize(("condition", "option"),
+                         [("display", "--title"), ("log", "--regex")])
+def test_help_is_a_filter_value(kemu, fixtures, condition, option, oneshot):
+    kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
+    args = ["wait", condition, "--timeout", "0"]
+    if condition == "log":
+        args.extend(["--since", kemu.ok("logs", "cursor")["cursor"]])
+    # Keep the filter last: this is where the generic help suffix intercepted it.
+    kemu.err(*args, option, "help", code="TIMEOUT", oneshot=oneshot)
+
+
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+def test_help_is_a_path_value(kemu, oneshot):
+    kemu.err("inspect", "help", code="PATH_NOT_FOUND", oneshot=oneshot)
+
+
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+def test_help_flags_after_literal_marker(kemu, oneshot):
+    kemu.err("open", "--", "--help", code="PATH_NOT_FOUND", oneshot=oneshot)
+    kemu.err("open", "--", "-h", code="PATH_NOT_FOUND", oneshot=oneshot)
+
+
 def test_unknown_and_bare_commands(kemu):
     kemu.err("nope", code="UNKNOWN_COMMAND")
     kemu.err("command", code="USAGE_ERROR")

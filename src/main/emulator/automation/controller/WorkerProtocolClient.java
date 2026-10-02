@@ -36,7 +36,10 @@ final class WorkerProtocolClient {
 		}
 
 		ReentrantLock lock = worker.protocolLock;
-		if (!controlPath) {
+		// The worker handles each connection independently. A condition wait
+		// must leave commands free to produce the event it is waiting for.
+		boolean serialize = !controlPath && !"wait-condition".equals(operation);
+		if (serialize) {
 			lock.lock();
 		}
 
@@ -108,7 +111,7 @@ final class WorkerProtocolClient {
 				}
 			}
 		} finally {
-			if (!controlPath) {
+			if (serialize) {
 				lock.unlock();
 			}
 		}

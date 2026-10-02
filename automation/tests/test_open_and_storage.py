@@ -3,6 +3,8 @@
 import hashlib
 from pathlib import Path
 
+import pytest
+
 
 def _tree_digest(root: Path) -> dict[str, str]:
     return {
@@ -111,6 +113,62 @@ def test_implicit_session_local_reset_still_works(kemu, fixtures, workdir):
             "--data-dir", str(data_dir), "--reset-state", "--wait-ready")
     kemu.close()
     assert not marker.exists()
+
+
+def test_invalid_worker_heap_preserves_state_before_reset(kemu, fixtures, workdir):
+    data_dir = workdir / "invalid-heap-data"
+    jar = fixtures["RMS_COUNTER_JAR"]
+    kemu.ok("open", jar, "--headless", "--data-dir", str(data_dir),
+            "--reset-state", "--wait-ready")
+    assert kemu.title() == "RMS count 1"
+    kemu.close()
+
+    assert (data_dir / "property.txt").is_file()
+    assert list((data_dir / "rms").rglob("*.rms"))
+    before = _tree_digest(data_dir)
+    kemu.err("open", jar, "--headless", "--data-dir", str(data_dir),
+             "--reset-state", "--worker-xmx", "512MB", "--wait-ready",
+             code="INVALID_REQUEST")
+    assert _tree_digest(data_dir) == before
+
+    kemu.ok("open", jar, "--headless", "--data-dir", str(data_dir), "--wait-ready")
+    assert kemu.title() == "RMS count 2"
+    kemu.close()
+
+
+@pytest.mark.parametrize("scope,export_action,import_action,archive_root", [
+    ("rms", "export", "import", "rms"),
+    ("state", "snapshot", "restore", "data"),
+    ("state", "snapshot", "restore", "rms"),
+    ("state", "snapshot", "restore", "files"),
+])
+def test_restore_rejects_archive_in_storage_root(
+        kemu, fixtures, workdir, scope, export_action, import_action, archive_root):
+    case_dir = workdir / f"nested-archive-{scope}-{archive_root}"
+    roots = {name: case_dir / name for name in ("data", "rms", "files")}
+    jar = fixtures["RMS_COUNTER_JAR"]
+    storage_options = ("--data-dir", str(roots["data"]),
+                       "--rms-dir", str(roots["rms"]),
+                       "--file-root", str(roots["files"]))
+    kemu.ok("open", jar, "--headless", *storage_options, "--wait-ready")
+    assert kemu.title() == "RMS count 1"
+    kemu.close()
+    (roots["files"] / "sentinel.txt").write_text("memory card\n")
+
+    archive = case_dir / "backup.zip"
+    kemu.ok(scope, export_action, str(archive))
+    nested_archive = roots[archive_root] / "backup.zip"
+    nested_archive.write_bytes(archive.read_bytes())
+    before = {name: _tree_digest(root) for name, root in roots.items()}
+
+    kemu.err(scope, import_action, str(nested_archive), code="STORAGE_ERROR")
+    assert {name: _tree_digest(root) for name, root in roots.items()} == before
+
+    kemu.ok(scope, import_action, str(archive))
+    assert (roots["files"] / "sentinel.txt").read_text() == "memory card\n"
+    kemu.ok("open", jar, "--headless", *storage_options, "--wait-ready")
+    assert kemu.title() == "RMS count 2"
+    kemu.close()
 
 
 def test_memory_card_mapping(kemu, fixtures, workdir):

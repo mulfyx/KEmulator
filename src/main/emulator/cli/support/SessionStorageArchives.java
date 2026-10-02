@@ -147,8 +147,17 @@ public final class SessionStorageArchives {
 			throw new IOException("Archive not found: " + normalizedArchive);
 		}
 		validateArchive(normalizedArchive, roots);
+		Path realArchive = normalizedArchive.toRealPath();
 		for (Path root : roots.values()) {
 			validateMutableRoot(root, "storage root");
+			Path normalizedRoot = root.toAbsolutePath().normalize();
+			Path realRoot = Files.exists(normalizedRoot) ? normalizedRoot.toRealPath() : normalizedRoot;
+			if (normalizedArchive.startsWith(normalizedRoot) || realArchive.startsWith(realRoot)) {
+				throw new IOException("Archive input must be outside the restored storage roots: "
+					+ normalizedArchive + ". Nothing was deleted.");
+			}
+		}
+		for (Path root : roots.values()) {
 			reset(root);
 		}
 		ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Files.newInputStream(normalizedArchive)));

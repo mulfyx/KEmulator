@@ -15,17 +15,27 @@ public final class LifecycleFixtureMidlet extends MIDlet {
 	private int paused;
 
 	protected void startApp() {
+		if (started > 0) waitForCallback();
 		started++;
 		updateTitle();
 		Display.getDisplay(this).setCurrent(form);
 	}
 
 	protected void pauseApp() {
+		waitForCallback();
 		paused++;
 		updateTitle();
 	}
 
 	protected void destroyApp(boolean unconditional) {
+	}
+
+	private void waitForCallback() {
+		try {
+			Thread.sleep(150L);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	private void updateTitle() {

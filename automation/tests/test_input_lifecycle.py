@@ -39,14 +39,43 @@ def test_pause_and_resume_drive_the_midlet_lifecycle(kemu, fixtures):
     assert paused["paused"] is True
     assert paused["newRevision"] > paused["oldRevision"]
     assert paused["state"]["paused"] is True
+    assert paused["state"]["displayable"]["title"] == "lifecycle started=1 paused=1"
     assert kemu.title() == "lifecycle started=1 paused=1"
 
     resumed = kemu.ok("resume")
     assert resumed["paused"] is False
-    kemu.wait_title("lifecycle started=2 paused=1", timeout_ms=10000)
+    assert resumed["state"]["displayable"]["title"] == "lifecycle started=2 paused=1"
 
     # The app is interactive again after resume.
     kemu.ok("wait", "idle", "--timeout", "5000")
+
+
+def test_repeated_pause_and_resume_do_not_leave_pending_lifecycle_events(kemu, fixtures):
+    kemu.open_ready(fixtures["LIFECYCLE_JAR"])
+
+    for started, paused_count in ((1, 1), (2, 2)):
+        kemu.ok("pause")
+        kemu.wait_title(f"lifecycle started={started} paused={paused_count}")
+        repeated_pause = kemu.ok("pause")
+        assert repeated_pause["paused"] is True
+
+        resumed = kemu.ok("resume")
+        expected_title = f"lifecycle started={started + 1} paused={paused_count}"
+        assert resumed["paused"] is False
+
+        # Check recovery before another resume could release a stale pause.
+        idle = kemu.ok("wait", "idle", "--timeout", "5000")
+        assert idle["state"]["paused"] is False
+        assert idle["state"]["displayable"]["title"] == expected_title
+        assert resumed["state"]["displayable"]["title"] == expected_title
+        assert repeated_pause["newRevision"] == repeated_pause["oldRevision"]
+
+        repeated_resume = kemu.ok("resume")
+        assert repeated_resume["paused"] is False
+        assert repeated_resume["newRevision"] == repeated_resume["oldRevision"]
+        idle = kemu.ok("wait", "idle", "--timeout", "5000")
+        assert idle["state"]["paused"] is False
+        assert idle["state"]["displayable"]["title"] == expected_title
 
 
 def test_date_field_set(kemu, fixtures):
