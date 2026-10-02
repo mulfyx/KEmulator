@@ -226,6 +226,10 @@ public class ChoiceGroup
 		return this.items.size();
 	}
 
+	int automationCurrentIndex() {
+		return choiceType == POPUP ? currentSelect : currentPos;
+	}
+
 	void _itemApplyCommand() {
 		super._itemApplyCommand();
 		if (this.aBoolean541 && this.aCommand540 != null) {

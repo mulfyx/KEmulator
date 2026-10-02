@@ -7,7 +7,7 @@ import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
 import emulator.cli.core.KemuCliException;
-import emulator.cli.output.CliResponses;
+import emulator.cli.output.PublicResult;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -36,7 +36,7 @@ final class BridgeCommand implements CliCommand {
 	}
 
 	private static Json invalidRequest(Json id, String message) {
-		return CliResponses.errorEnvelope("bridge", CliErrorCodes.USAGE_ERROR, message, null)
+		return PublicResult.error("bridge", CliErrorCodes.USAGE_ERROR, message, null, false)
 			.set("id", id);
 	}
 
@@ -63,7 +63,7 @@ final class BridgeCommand implements CliCommand {
 				continue;
 			}
 
-			if ("--session-id".equals(value)) {
+			if ("--session".equals(value) || "--session-id".equals(value)) {
 				return invalidRequest(id, "The session id is fixed per bridge process.");
 			}
 
@@ -77,13 +77,13 @@ final class BridgeCommand implements CliCommand {
 		Json response;
 		try {
 			CommandResult result = app.run(argv.toArray(new String[argv.size()]));
-			response = CliResponses.successEnvelope(result.commandName, result.payload);
+			response = PublicResult.envelope(result);
 		} catch (KemuCliException failure) {
-			response = CliResponses.errorEnvelope(
-				failure.commandName, failure.code, failure.getMessage(), failure.payload);
+			response = PublicResult.error(
+				failure.commandName, failure.code, failure.getMessage(), failure.payload, CliApp.flagRequested(argv.toArray(new String[argv.size()]), "--verbose"));
 		} catch (Exception failure) {
-			response = CliResponses.errorEnvelope(
-				null, CliErrorCodes.INTERNAL_ERROR, failure.toString(), null);
+			response = PublicResult.error(
+				null, CliErrorCodes.INTERNAL_ERROR, failure.toString(), null, false);
 		}
 
 		return response.set("id", id);
@@ -137,6 +137,6 @@ final class BridgeCommand implements CliCommand {
 
 		// Responses were already streamed; the bridge itself stays silent so
 		// line-oriented consumers never see a trailing id-less envelope.
-		return new CommandResult("bridge", "", Json.object(), false);
+		return CommandResult.streamed("bridge");
 	}
 }

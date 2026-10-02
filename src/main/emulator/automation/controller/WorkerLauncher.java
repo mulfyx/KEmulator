@@ -181,7 +181,8 @@ final class WorkerLauncher {
 		command.add(readyPath.toAbsolutePath().toString());
 
 		command.add("-screen");
-		command.add(screenWidth + "x" + screenHeight);
+		command.add(request.at("screenWidth", screenWidth).asInteger() + "x"
+			+ request.at("screenHeight", screenHeight).asInteger());
 
 		ProcessBuilder builder = new ProcessBuilder(command);
 		builder.directory(runtimeRoot.toFile());

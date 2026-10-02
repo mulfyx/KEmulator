@@ -1,47 +1,40 @@
 # Automation CLI roadmap
 
-What the current command surface does not cover for agent use, ordered by
-practical value. The contract itself (envelopes, wait/mutation shapes, error
-codes) is considered settled; see `AutomationReleaseNotes.md`.
+The implemented agent workflow and response contract live in
+[CliAutomation.md](../CliAutomation.md). The public workflow tests and their
+runner are documented in [tests/README.md](tests/README.md).
 
-## Done
+## Implemented
 
-- **JSONL bridge** (`kemu bridge`): one long-lived CLI process, one request
-  per stdin line, envelope + echoed `id` per stdout line. Removes the
-  per-command JVM startup cost (~300-500 ms per call).
-- **`wait display --title-regex`** — regex matching next to the exact-title
-  filter.
-- **Softkey-only commands** — `state.displayable.commands` marks
-  `softkey: "left"|"right"` and `softkeyOnly: true`; BACK/EXIT commands the
-  menu omits are invokable by id.
-- **`observe --screenshot FILE`** — one worker call returns the snapshot and
-  writes the image, so state and picture cannot drift apart.
-- **`pause` / `resume`** — MIDP lifecycle control; `pauseApp()` now fires for
-  non-Canvas displayables too (`EventQueue.EVENT_PAUSE` no longer returns
-  early).
-- **Half-stroke input** — `key down`/`key up` (chords) and
-  `pointer down`/`pointer up` (holds).
-- **`date-field set EPOCH_MS`** — the last interactive LCDUI item without a
-  setter; snapshots report `date`/`inputMode`.
+- `open` starts a named session and returns its first UI or pending permission.
+- `activate`, `select`, and `set` operate on live refs. Values and selections
+  preserve unrelated refs; removed targets and old workers reject stale refs.
+- Native actions return their receipt and current observation. Physical input
+  acknowledges delivery and supports separate down/up strokes for holds/chords.
+- Permission replies continue the original callback, including a pending key
+  press whose matching release has already been scheduled.
+- Screen, ready, exit, frame, permission and log waits use finite budgets.
+  Startup timeout retains the launched worker; admitted action timeout reports
+  an unknown effect.
+- Canvas observations capture the current owner and geometry. Explicit native
+  screenshot captures and Canvas/GameCanvas pixel tests cover actual PNG bytes.
+- One-shot and JSONL bridge commands share the public outcomes and facts. Text
+  shows the same task facts, with runtime diagnostics available through verbose.
+- Public storage commands validate resets and restores before changing saves.
 
-## Later: functional gaps
+## Optional functional gaps
 
-1. **Chord ergonomics** — `key down`/`key up` cover chords, but a single
-   `key chord UP+LEFT` shorthand would remove two round trips per step.
-2. **Multi-touch** — the pointer primitives use pointer id `0` only.
-3. **Text input via keys** — no T9/predictive input path; `text-box set`
-   bypasses the keypad entirely, so IME behavior is untested.
+1. A chord shorthand could reduce the round trips needed for separate down/up.
+2. Pointer primitives currently use one pointer; multi-touch remains unexposed.
+3. Native text setters cover editable fields; keypad/T9 input behavior remains
+   a separate emulator capability to investigate.
 
-## Research-level (emulator changes, not commands)
+## Emulator research
 
-7. **Deterministic time** — fake/accelerated clock for timer-driven
-   gameplay; today agents wait wall-clock time.
-8. **Network observation/mocking** — HTTP/socket connections are only
-   gated by permissions; agents cannot inspect or stub them.
-9. **Deep introspection** — resources, heap state, live method hooks
-   (the scope of the former AutomationAgentRoadmap).
+- Deterministic or accelerated time for timer-driven applications.
+- Observing or mocking HTTP/socket traffic beyond permission requests.
+- Resource, heap and live method introspection.
 
-Rules for adding a command: it must appear in `kemu help` (the registry is
-served as `help --json` `result.commands`), follow the envelope/wait/mutation
-shapes, take its limits from `AutomationLimits`, and land with tests — the
-coverage gate fails any registered command without a passing invocation.
+Changes to the public surface must be discoverable through `help` and have a
+consumer-visible test. The full suite checks advertised command coverage;
+proposed research items are not requirements for the current workflow.

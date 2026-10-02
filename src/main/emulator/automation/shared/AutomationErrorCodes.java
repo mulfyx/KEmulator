@@ -1,6 +1,10 @@
 package emulator.automation.shared;
 
 public final class AutomationErrorCodes {
+	public static final String STALE_REF = "STALE_REF";
+	public static final String UNSUPPORTED_ACTION = "UNSUPPORTED_ACTION";
+	public static final String FRAME_NOT_READY = "FRAME_NOT_READY";
+	public static final String INPUT_BLOCKED = "INPUT_BLOCKED";
 	public static final String APP_ALREADY_OPEN = "APP_ALREADY_OPEN";
 	public static final String APP_INPUT_UNAVAILABLE = "APP_INPUT_UNAVAILABLE";
 	public static final String CONTROLLER_ERROR = "CONTROLLER_ERROR";

@@ -66,7 +66,17 @@ public final class AutomationWorkerRuntime {
 		WorkerRuntimeLifecycle.startIfEnabled(WorkerSocketServer.serverLoop());
 	}
 
+	public static void onDisplayChanging(javax.microedition.lcdui.Displayable next) {
+		if (!isEnabled()) return;
+		WorkerTargets.clearUi();
+		WorkerFrameCapture.displayChanging(next);
+	}
+
 	public static void onDisplayChanged(String kind, String title) {
+		if (isEnabled()) {
+			WorkerTargets.clearUi();
+			WorkerFrameCapture.displayChanged();
+		}
 		if (!isEnabled()) {
 			return;
 		}

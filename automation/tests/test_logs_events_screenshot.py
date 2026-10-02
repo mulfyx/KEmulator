@@ -1,59 +1,43 @@
-"""Worker logs, structured events, and screenshots."""
-
+"""Public logs, input evidence and standalone PNG captures."""
 from kemu import png_size
 
 
 def test_logs_cursor_read_wait(kemu, fixtures):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-
     cursor = kemu.ok("logs", "cursor")["cursor"]
-    assert isinstance(cursor, str) and ":" in cursor
-
-    read = kemu.ok("logs", "read")
-    assert isinstance(read["lines"], list)
-    assert read["lines"] and "offset" not in read["lines"][0]
-    assert any("Mega" in line["line"] or "Get class" in line["line"]
-               for line in read["lines"])
-
-    read_since = kemu.ok("logs", "read", "--since", cursor)
-    assert read_since["fromOffset"] >= 0
-
-    waited = kemu.ok("wait", "log", "--regex", "Launch MIDlet class",
-                     "--timeout", "5000")
-    assert waited["matched"] is True
-
-    kemu.err("logs", "read", "--since", "not-a-cursor", code="INVALID_REQUEST")
+    assert isinstance(cursor, str) and cursor
+    read = kemu.ok("logs")
+    assert isinstance(read["lines"], list) and read["lines"]
+    assert any("MEGA fixture started" in line["line"] for line in read["lines"])
+    assert isinstance(kemu.ok("logs", "--since", cursor)["lines"], list)
+    kemu.ok("wait", "log", "--regex", "MEGA fixture started", "--timeout", "5000")
+    kemu.err("logs", "--since", "not-a-cursor", code="INVALID_REQUEST")
 
 
 def test_events_read(kemu, fixtures):
-    kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    kemu.run_command("Open editor")
-
-    events = kemu.ok("events", "read")
-    assert events["cursor"] > 0
-    names = {event["event"] for event in events["events"]}
-    assert "display-changed" in names
-
-    since = events["cursor"]
-    kemu.ok("key", "press", "SOFT_RIGHT", "--wait-dispatched")
-    fresh = kemu.ok("events", "read", "--since", str(since))
-    assert all(event["cursor"] > since for event in fresh["events"])
-    assert any(event["event"] == "input-dispatched" for event in fresh["events"])
+    # The public events stream was removed. Callback evidence is available in
+    # the app log; this keeps the old delivery regression covered publicly.
+    kemu.open_ready(fixtures["AGENT_CONTRACT_JAR"])
+    kemu.run_command("Slow input")
+    cursor = kemu.ok("logs", "cursor")["cursor"]
+    kemu.ok("key", "press", "5", "--timeout", "5000")
+    kemu.ok("wait", "log", "--regex", "AGENT keyReleased", "--since", cursor)
+    lines = kemu.ok("logs", "--since", cursor)["lines"]
+    assert any("AGENT keyPressed completed" in line["line"] for line in lines)
+    assert any("AGENT keyReleased" in line["line"] for line in lines)
 
 
 def test_screenshot(kemu, fixtures, workdir):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-
-    capture = workdir / "capture.png"
-    result = kemu.ok("screenshot", str(capture))
-    assert result["saved"] is True
-    assert result["path"] == str(capture)
-    assert "imageBase64" not in result
-    assert png_size(capture) == (240, 320)
-
-    jpg = workdir / "capture.jpg"
-    assert kemu.ok("screenshot", str(jpg))["saved"] is True
-    assert png_size(jpg) == (240, 320)  # bytes are PNG regardless of extension
+    for name in ("capture.png", "capture.jpg"):
+        capture = workdir / name
+        result = kemu.ok("screenshot", str(capture))
+        image = kemu.state_of(result)["image"]
+        assert image["path"] == str(capture)
+        assert png_size(capture) == (240, 320)
+    result = kemu.ok("screenshot")
+    assert png_size(kemu.state_of(result)["image"]["path"]) == (240, 320)
     blocked = workdir / "as-dir.png"
     blocked.mkdir()
-    kemu.err("screenshot", str(blocked), code="SCREENSHOT_WRITE_FAILED")
+    failure = kemu.err("screenshot", str(blocked), code="SCREENSHOT_WRITE_FAILED", oneshot=True)
+    assert failure.exit_code == 3

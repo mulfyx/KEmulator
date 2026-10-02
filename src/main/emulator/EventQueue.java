@@ -1,6 +1,7 @@
 package emulator;
 
 import com.vodafone.v10.graphics.sprite.SpriteCanvas;
+import emulator.automation.worker.WorkerFrameCapture;
 import emulator.graphics2D.IImage;
 import emulator.ui.IScreen;
 import net.rim.device.api.system.Application;
@@ -9,9 +10,12 @@ import javax.microedition.lcdui.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.Vector;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class EventQueue implements Runnable {
 	public static final int EVENT_PAINT = 1;
@@ -46,7 +50,7 @@ public final class EventQueue implements Runnable {
 		}
 	}
 
-	private static final class LifecycleAction {
+	public static final class LifecycleAction {
 		private final boolean pause;
 		private final CountDownLatch done = new CountDownLatch(1);
 		private int pendingCallbacks = 1;
@@ -54,6 +58,14 @@ public final class EventQueue implements Runnable {
 
 		private LifecycleAction(boolean pause) {
 			this.pause = pause;
+		}
+
+		public boolean await(long timeoutMs) throws InterruptedException {
+			return done.await(Math.max(0L, timeoutMs), TimeUnit.MILLISECONDS);
+		}
+
+		public synchronized Throwable failure() {
+			return failure;
 		}
 
 		private synchronized void callbackStarted() {
@@ -76,21 +88,25 @@ public final class EventQueue implements Runnable {
 	private final Vector eventArguments = new Vector();
 	private final Thread eventThread;
 	private volatile boolean paused;
-	private final Object lifecycleLock = new Object();
+	private final ReentrantLock lifecycleLock = new ReentrantLock();
 	private LifecycleAction pendingLifecycle;
+	private final ThreadLocal<LifecycleAction> currentLifecycleDispatch = new ThreadLocal<LifecycleAction>();
 	private volatile LifecycleAction queuedLifecycle;
 	private final Object callbackLock = new Object();
 	private boolean alive;
 	private final Object eventLock = new Object();
 
 	private final Object repaintLock = new Object();
+	private Displayable renderedOwner;
+	private long renderedGeneration = -1L;
 	private boolean repaintPending;
 	private int repaintX, repaintY, repaintW, repaintH;
 
 	private int[][] inputs;
 	private int inputsCount;
 	private int nextInputSequence = 1;
-	private int deliveredInputSequence;
+	private final Set<Integer> pendingInputDispatch = new HashSet<Integer>();
+	private final ThreadLocal<Integer> currentInputDispatch = new ThreadLocal<Integer>();
 	private final Object inputDispatchLock = new Object();
 	private final InputThread input = new InputThread();
 	private final Thread inputThread;
@@ -146,6 +162,23 @@ public final class EventQueue implements Runnable {
 
 	public void stop() {
 		running = false;
+		synchronized (input.readLock) {
+			input.readLock.notifyAll();
+		}
+	}
+
+	public boolean isEventThread() {
+		return Thread.currentThread() == eventThread;
+	}
+
+	/** Identifies a permission raised by the input callback on this thread. */
+	public int currentInputSequence() {
+		Integer sequence = currentInputDispatch.get();
+		return sequence == null ? 0 : sequence.intValue();
+	}
+
+	public Object currentLifecycleOperation() {
+		return currentLifecycleDispatch.get();
 	}
 
 	public void keyPress(int n) {
@@ -222,9 +255,10 @@ public final class EventQueue implements Runnable {
 		synchronized (inputDispatchLock) {
 			if (nextInputSequence == Integer.MAX_VALUE) {
 				nextInputSequence = 1;
-				deliveredInputSequence = 0;
 			}
-			return nextInputSequence++;
+			int sequence = nextInputSequence++;
+			pendingInputDispatch.add(Integer.valueOf(sequence));
+			return sequence;
 		}
 	}
 
@@ -233,8 +267,14 @@ public final class EventQueue implements Runnable {
 			return;
 		}
 		synchronized (inputDispatchLock) {
-			deliveredInputSequence = inputEvent[4];
+			pendingInputDispatch.remove(Integer.valueOf(inputEvent[4]));
 			inputDispatchLock.notifyAll();
+		}
+	}
+
+	public boolean isInputDispatched(int sequence) {
+		synchronized (inputDispatchLock) {
+			return sequence <= 0 || !pendingInputDispatch.contains(Integer.valueOf(sequence));
 		}
 	}
 
@@ -244,7 +284,7 @@ public final class EventQueue implements Runnable {
 		}
 		long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, timeoutMs));
 		synchronized (inputDispatchLock) {
-			while (deliveredInputSequence != sequence) {
+			while (pendingInputDispatch.contains(Integer.valueOf(sequence))) {
 				long remaining = deadline - System.nanoTime();
 				if (remaining <= 0L) {
 					return false;
@@ -264,16 +304,37 @@ public final class EventQueue implements Runnable {
 		throws InterruptedException, TimeoutException {
 		long deadline = System.nanoTime()
 			+ TimeUnit.MILLISECONDS.toNanos(Math.max(0L, timeoutMs));
-		synchronized (lifecycleLock) {
+		LifecycleAction action = requestPaused(pause, timeoutMs);
+		if (action == null) return false;
+		awaitLifecycle(action, deadline);
+		if (action.failure() != null) {
+			throw new RuntimeException("MIDlet lifecycle callback failed", action.failure());
+		}
+		return true;
+	}
+
+	/** Admission is bounded separately from callback completion. */
+	public LifecycleAction requestPaused(boolean pause, long timeoutMs)
+		throws InterruptedException, TimeoutException {
+		long deadline = System.nanoTime()
+			+ TimeUnit.MILLISECONDS.toNanos(Math.max(0L, timeoutMs));
+		if (!lifecycleLock.tryLock(Math.max(0L, timeoutMs), TimeUnit.MILLISECONDS)) {
+			throw new TimeoutException("MIDlet lifecycle operation was not admitted");
+		}
+		try {
 			// A timed-out request can still be in flight. Wait for it before
 			// deciding whether a retry needs another lifecycle event.
 			if (pendingLifecycle != null) {
+				if (pendingLifecycle.pause == pause && pendingLifecycle.done.getCount() != 0L) {
+					return pendingLifecycle;
+				}
 				awaitLifecycle(pendingLifecycle, deadline);
 				pendingLifecycle = null;
 			}
 			if (paused == pause) {
-				return false;
+				return null;
 			}
+			if (System.nanoTime() >= deadline) throw new TimeoutException("MIDlet lifecycle operation was not admitted");
 
 			LifecycleAction action = new LifecycleAction(pause);
 			pendingLifecycle = action;
@@ -286,12 +347,9 @@ public final class EventQueue implements Runnable {
 				paused = false;
 			}
 			queue(EVENT_TRACKED_LIFECYCLE);
-			awaitLifecycle(action, deadline);
-			pendingLifecycle = null;
-			if (action.failure != null) {
-				throw new RuntimeException("MIDlet lifecycle callback failed", action.failure);
-			}
-			return true;
+			return action;
+		} finally {
+			lifecycleLock.unlock();
 		}
 	}
 
@@ -414,7 +472,10 @@ public final class EventQueue implements Runnable {
 	}
 
 	public void gameGraphicsFlush() {
+		Displayable owner = getCurrent();
+		long generation = WorkerFrameCapture.paintStarted(owner);
 		synchronized (repaintLock) {
+			if (owner != getCurrent()) return;
 			IScreen scr = Emulator.getEmulator().getScreen();
 			if (AppSettings.asyncFlush) {
 				final IImage screenImage = scr.getScreenImg();
@@ -422,13 +483,19 @@ public final class EventQueue implements Runnable {
 				final IImage xRayScreenImage2 = scr.getXRayScreenImage();
 				(AppSettings.xrayView ? xRayScreenImage2 : backBufferImage2).cloneImage(screenImage);
 			}
+			WorkerFrameCapture.publish(owner, scr.getScreenImg(), generation);
+			renderedOwner = owner;
+			renderedGeneration = generation;
 			scr.repaint();
 		}
 		emulator.automation.worker.AutomationWorkerRuntime.onFrameRendered();
 	}
 
 	public void gameGraphicsFlush(int x, int y, int w, int h) {
+		Displayable owner = getCurrent();
+		long generation = WorkerFrameCapture.paintStarted(owner);
 		synchronized (repaintLock) {
+			if (owner != getCurrent()) return;
 			IScreen scr = Emulator.getEmulator().getScreen();
 			if (AppSettings.asyncFlush) {
 				final IImage screenImage = scr.getScreenImg();
@@ -436,7 +503,75 @@ public final class EventQueue implements Runnable {
 				final IImage xRayScreenImage2 = scr.getXRayScreenImage();
 				(AppSettings.xrayView ? xRayScreenImage2 : backBufferImage2).cloneImage(screenImage, x, y, w, h);
 			}
+			WorkerFrameCapture.publish(owner, scr.getScreenImg(), generation);
+			renderedOwner = owner;
+			renderedGeneration = generation;
 			scr.repaint();
+		}
+		emulator.automation.worker.AutomationWorkerRuntime.onFrameRendered();
+	}
+
+	public void gameGraphicsFlush(Displayable owner, long generation, int[] pixels,
+			int width, int height) {
+		gameGraphicsFlush(owner, generation, pixels, width, height, 0, 0, width, height);
+	}
+
+	public void gameGraphicsFlush(Displayable owner, long generation, int[] pixels,
+			int width, int height, int x, int y, int w, int h) {
+		synchronized (repaintLock) {
+			if (owner != getCurrent() || generation != WorkerFrameCapture.paintStarted(owner)) return;
+			IScreen screen = Emulator.getEmulator().getScreen();
+			IImage output = screen.getScreenImg();
+			if (width != output.getWidth() || height != output.getHeight()) return;
+			int x1 = Math.max(0, x), y1 = Math.max(0, y);
+			int x2 = (int) Math.min(width, (long) x + w);
+			int y2 = (int) Math.min(height, (long) y + h);
+			if (x2 <= x1 || y2 <= y1) return;
+			if (x1 == 0 && y1 == 0 && x2 == width && y2 == height) {
+				output.setData(pixels);
+			} else {
+				int[] outputPixels;
+				if (renderedOwner == owner && renderedGeneration == generation) {
+					outputPixels = output.getData().clone();
+				} else {
+					outputPixels = new int[width * height];
+					java.util.Arrays.fill(outputPixels, 0xffffffff);
+				}
+				for (int row = y1; row < y2; row++) {
+					System.arraycopy(pixels, row * width + x1, outputPixels,
+						row * width + x1, x2 - x1);
+				}
+				output.setData(outputPixels);
+			}
+			WorkerFrameCapture.publish(owner, output, generation);
+			renderedOwner = owner;
+			renderedGeneration = generation;
+			screen.repaint();
+		}
+		emulator.automation.worker.AutomationWorkerRuntime.onFrameRendered();
+	}
+
+	private void initializeFrame(Displayable owner, long generation, IImage buffer, IImage xray) {
+		if (renderedOwner == owner && renderedGeneration == generation) return;
+		int[] pixels = new int[buffer.getWidth() * buffer.getHeight()];
+		java.util.Arrays.fill(pixels, 0xffffffff);
+		buffer.setData(pixels);
+		if (xray != null) xray.setData(new int[xray.getWidth() * xray.getHeight()]);
+	}
+
+	public void gameGraphicsBlit(Displayable owner, Image image, int x, int y) {
+		synchronized (repaintLock) {
+			if (owner != getCurrent()) return;
+			long generation = WorkerFrameCapture.paintStarted(owner);
+			IScreen screen = Emulator.getEmulator().getScreen();
+			IImage output = screen.getScreenImg();
+			initializeFrame(owner, generation, output, null);
+			Graphics graphics = new Graphics(output, screen.getXRayScreenImage());
+			graphics.drawImage(image, x, y, 0);
+			WorkerFrameCapture.publish(owner, output, generation);
+			renderedOwner = owner;
+			renderedGeneration = generation;
+			screen.repaint();
 		}
 		emulator.automation.worker.AutomationWorkerRuntime.onFrameRendered();
 	}
@@ -492,17 +627,24 @@ public final class EventQueue implements Runnable {
 							Displayable d = getCurrent();
 							repaintPending = false;
 							if (!(d instanceof Screen)) break;
-							IScreen scr = Emulator.getEmulator().getScreen();
-							final IImage backBufferImage3 = scr.getBackBufferImage();
-							final IImage xRayScreenImage3 = scr.getXRayScreenImage();
-							((Screen) d)._invokePaint(new Graphics(backBufferImage3, xRayScreenImage3));
-							if (AppSettings.asyncFlush) {
-								try {
-									(AppSettings.xrayView ? xRayScreenImage3 : backBufferImage3)
-											.cloneImage(scr.getScreenImg());
-								} catch (Exception ignored) {}
+							synchronized (repaintLock) {
+								IScreen scr = Emulator.getEmulator().getScreen();
+								long generation = WorkerFrameCapture.paintStarted(d);
+								if (!((Screen) d)._isSWT()) {
+									final IImage backBufferImage3 = scr.getBackBufferImage();
+									final IImage xRayScreenImage3 = scr.getXRayScreenImage();
+									initializeFrame(d, generation, backBufferImage3, xRayScreenImage3);
+									((Screen) d)._invokePaint(new Graphics(backBufferImage3, xRayScreenImage3));
+									if (AppSettings.asyncFlush) {
+										(AppSettings.xrayView ? xRayScreenImage3 : backBufferImage3)
+												.cloneImage(scr.getScreenImg());
+									}
+									WorkerFrameCapture.publish(d, scr.getScreenImg(), generation);
+									renderedOwner = d;
+									renderedGeneration = generation;
+								}
+								scr.repaint();
 							}
-							scr.repaint();
 							emulator.automation.worker.AutomationWorkerRuntime.onFrameRendered();
 							int interval = ((Screen) d)._repaintInterval();
 							if (interval > 0) {
@@ -590,10 +732,8 @@ public final class EventQueue implements Runnable {
 							}
 							if (e == null) break;
 							synchronized (callbackLock) {
-								processInputEvent(e);
+								dispatchInputEvent(e);
 							}
-							markInputDelivered(e);
-							emulator.automation.worker.AutomationWorkerRuntime.onInputDispatched();
 							// skip 1ms delay
 							continue;
 						}
@@ -673,6 +813,8 @@ public final class EventQueue implements Runnable {
 	}
 
 	private void dispatchLifecycle(final LifecycleAction action) {
+		if (action == null) return;
+		currentLifecycleDispatch.set(action);
 		Throwable failure = null;
 		try {
 			Displayable current = getCurrent();
@@ -686,12 +828,14 @@ public final class EventQueue implements Runnable {
 				if (AppSettings.startAppOnResume) {
 					Thread startThread = new Thread(new Runnable() {
 						public void run() {
+							currentLifecycleDispatch.set(action);
 							Throwable failure = null;
 							try {
 								new InvokeStartAppRunnable(false).run();
 							} catch (Throwable throwable) {
 								failure = throwable;
 							} finally {
+								currentLifecycleDispatch.remove();
 								action.callbackFinished(failure);
 							}
 						}
@@ -710,6 +854,7 @@ public final class EventQueue implements Runnable {
 		} catch (Throwable throwable) {
 			failure = throwable;
 		} finally {
+			currentLifecycleDispatch.remove();
 			action.callbackFinished(failure);
 		}
 	}
@@ -780,6 +925,12 @@ public final class EventQueue implements Runnable {
 	}
 
 	private void internalRepaint(int x, int y, int w, int h) {
+		synchronized (repaintLock) {
+			repaintCanvas(x, y, w, h);
+		}
+	}
+
+	private void repaintCanvas(int x, int y, int w, int h) {
 		repaintPending = false;
 		try {
 			Canvas canvas = Emulator.getCanvas();
@@ -787,6 +938,7 @@ public final class EventQueue implements Runnable {
 					|| Emulator.getCurrentDisplay().getCurrent() != Emulator.getCanvas()) {
 				return;
 			}
+			long generation = WorkerFrameCapture.paintStarted(canvas);
 			if (AppSettings.xrayView) Displayable._resetXRayGraphics();
 			IScreen scr = Emulator.getEmulator().getScreen();
 			IImage backBufferImage, xRayScreenImage;
@@ -798,6 +950,7 @@ public final class EventQueue implements Runnable {
 				xRayScreenImage = scr.getXRayScreenImage();
 			}
 			Displayable._checkForSteps(callbackLock);
+			initializeFrame(canvas, generation, backBufferImage, xRayScreenImage);
 			try {
 				if (x == -1) { // full repaint
 					canvas._invokePaint(backBufferImage, xRayScreenImage);
@@ -806,10 +959,14 @@ public final class EventQueue implements Runnable {
 				}
 			} catch (Exception ex) {
 				ex.printStackTrace();
+				return;
 			}
 			if (canvas instanceof SpriteCanvas) {
 				if (!((SpriteCanvas) canvas)._skipCopy) {
 					backBufferImage.cloneImage(scr.getScreenImg());
+					WorkerFrameCapture.publish(canvas, scr.getScreenImg(), generation);
+					renderedOwner = canvas;
+					renderedGeneration = generation;
 					scr.repaint();
 				}
 				return;
@@ -818,10 +975,24 @@ public final class EventQueue implements Runnable {
 				(AppSettings.xrayView ? xRayScreenImage : backBufferImage)
 						.cloneImage(scr.getScreenImg());
 			}
+			WorkerFrameCapture.publish(canvas, scr.getScreenImg(), generation);
+			renderedOwner = canvas;
+			renderedGeneration = generation;
 			scr.repaint();
 		} catch (Exception e) {
 			System.err.println("Exception in repaint!");
 			e.printStackTrace();
+		}
+	}
+
+	private void dispatchInputEvent(int[] event) {
+		currentInputDispatch.set(Integer.valueOf(event[4]));
+		try {
+			processInputEvent(event);
+		} finally {
+			currentInputDispatch.remove();
+			markInputDelivered(event);
+			emulator.automation.worker.AutomationWorkerRuntime.onInputDispatched();
 		}
 	}
 
@@ -889,7 +1060,6 @@ public final class EventQueue implements Runnable {
 		private Object[] elements;
 		private final Object readLock = new Object();
 		private int count;
-		private boolean added;
 
 		private InputThread() {
 			elements = new Object[16];
@@ -904,41 +1074,43 @@ public final class EventQueue implements Runnable {
 				if (count + 1 >= elements.length) {
 					System.arraycopy(elements, 0, elements = new Object[elements.length * 2], 0, count);
 				}
+				elements[count++] = o;
 			}
-			elements[count++] = o;
-			added = true;
 			synchronized (readLock) {
-				readLock.notify();
+				readLock.notifyAll();
 			}
+		}
+
+		private synchronized boolean hasQueuedInput() {
+			return count > 0;
 		}
 
 		public void run() {
 			while (running) {
 				try {
 					synchronized (readLock) {
-						if (!added) readLock.wait();
+						while (running && !hasQueuedInput()) readLock.wait();
 					}
-					added = false;
-					while (Emulator.getMIDlet() == null || paused) {
+					while (running && (Emulator.getMIDlet() == null || paused)) {
 						Thread.sleep(5);
 					}
-					while (count > 0) {
+					while (running) {
+						int[] o;
+						synchronized (this) {
+							if (count == 0) break;
+							o = (int[]) elements[0];
+							System.arraycopy(elements, 1, elements, 0, count - 1);
+							elements[--count] = null;
+						}
 						try {
-							int[] o = (int[]) elements[0];
 							if (AppSettings.synchronizeKeyEvents) {
 								synchronized (callbackLock) {
-									processInputEvent(o);
+									dispatchInputEvent(o);
 								}
-							} else processInputEvent(o);
-							markInputDelivered(o);
-							emulator.automation.worker.AutomationWorkerRuntime.onInputDispatched();
+							} else dispatchInputEvent(o);
 						} catch (Throwable e) {
 							System.err.println("Exception in Input Thread!");
 							e.printStackTrace();
-						}
-						synchronized (this) {
-							System.arraycopy(elements, 1, elements, 0, elements.length - 1);
-							elements[--count] = null;
 						}
 					}
 				} catch (Throwable e) {

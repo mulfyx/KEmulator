@@ -2,6 +2,7 @@ package emulator.automation.controller;
 
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
+import emulator.automation.shared.OperationDeadline;
 import emulator.automation.shared.TextValues;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -135,8 +136,11 @@ final class ControllerWorkerSession {
 	}
 
 	private static long openTimeoutMs(Json request) {
-		long timeoutMs = request.at(
-			"timeoutMs", (long) emulator.automation.shared.AutomationLimits.DEFAULT_OPEN_TIMEOUT_MS).asLong();
+		long timeoutMs = request.at("timeoutMs", request.at("openTimeoutMs", (long)
+			emulator.automation.shared.AutomationLimits.DEFAULT_OPEN_TIMEOUT_MS)).asLong();
+		if (request.has("openTimeoutMs")) {
+			timeoutMs = Math.min(timeoutMs, request.at("openTimeoutMs").asLong());
+		}
 		if (timeoutMs < emulator.automation.shared.AutomationLimits.MIN_OPEN_TIMEOUT_MS
 			|| timeoutMs > emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS) {
 			throw new AutomationException(
@@ -160,12 +164,12 @@ final class ControllerWorkerSession {
 	}
 
 	private static String sessionStatus(Json session) {
-		if (session.at("ready", false).asBoolean()) {
-			return "ready";
-		}
-
 		if (session.has("permissionRequest") && !session.at("permissionRequest").isNull()) {
 			return "pending-permission";
+		}
+		if (session.at("ready", false).asBoolean()
+			|| (session.has("displayable") && !session.at("displayable").isNull())) {
+			return "ready";
 		}
 
 		return "starting";
@@ -179,6 +183,7 @@ final class ControllerWorkerSession {
 
 		boolean waitReady = request.at("waitReady", true).asBoolean();
 		long openTimeoutMs = openTimeoutMs(request);
+		OperationDeadline deadline = OperationDeadline.afterMillis(openTimeoutMs);
 		synchronized (this) {
 			cleanupDeadWorkerLocked();
 			if (activeWorker != null || openInProgress) {
@@ -219,8 +224,23 @@ final class ControllerWorkerSession {
 
 			Json session;
 			try {
-				session = workerSupervisor.waitUntilReady(worker, openTimeoutMs);
+				session = workerSupervisor.waitUntilReady(worker, deadline.remainingMillis());
 			} catch (Exception failure) {
+				if (worker.process != null && worker.process.isAlive()
+					&& (failure instanceof InterruptedException
+						|| (failure instanceof AutomationException
+							&& (AutomationErrorCodes.OPEN_TIMEOUT.equals(((AutomationException) failure).code)
+								|| AutomationErrorCodes.TIMEOUT.equals(((AutomationException) failure).code))))) {
+					// A launch timeout leaves a real starting app. Keep it reachable
+					// for observe, permission, wait and an explicit close/stop.
+					if (failure instanceof InterruptedException) {
+						Thread.currentThread().interrupt();
+						throw new AutomationException(AutomationErrorCodes.OPEN_TIMEOUT,
+							"Interrupted while waiting for the first MIDlet display",
+							Json.object().set("workerRetained", true).set("reason", "interrupted"), failure);
+					}
+					throw failure;
+				}
 				synchronized (this) {
 					if (activeWorker == worker) {
 						activeWorker = null;
@@ -285,21 +305,20 @@ final class ControllerWorkerSession {
 		return result;
 	}
 
-	private static final long STARTING_CONNECT_GRACE_MS = 15000L;
 	private static final long STARTING_CONNECT_RETRY_MS = 100L;
 
 	private Json callWorker(WorkerProcess worker, String operation, Json arguments, boolean controlPath)
 		throws Exception {
 		// A freshly spawned worker needs a moment before its socket accepts
 		// connections; retry within a bounded grace instead of failing.
-		long graceDeadline = System.nanoTime()
-			+ TimeUnit.MILLISECONDS.toNanos(STARTING_CONNECT_GRACE_MS);
+		OperationDeadline deadline = OperationDeadline.fromRequest(arguments,
+			emulator.automation.shared.AutomationLimits.DEFAULT_TIMEOUT_MS);
 		Json result;
 		while (true) {
 			try {
 				result = controlPath
-					? workerSupervisor.callControl(worker, operation, arguments)
-					: workerSupervisor.call(worker, operation, arguments);
+					? workerSupervisor.callControl(worker, operation, deadline.withRemaining(arguments))
+					: workerSupervisor.call(worker, operation, deadline.withRemaining(arguments));
 				break;
 			} catch (java.net.ConnectException e) {
 				if (worker.process == null || !worker.process.isAlive()) {
@@ -314,7 +333,7 @@ final class ControllerWorkerSession {
 					throw e;
 				}
 
-				if (System.nanoTime() >= graceDeadline) {
+				if (deadline.timedOut()) {
 					throw new AutomationException(
 						AutomationErrorCodes.WORKER_STARTING,
 						"Worker is still starting and does not accept commands yet",
@@ -323,7 +342,7 @@ final class ControllerWorkerSession {
 				}
 
 				try {
-					Thread.sleep(STARTING_CONNECT_RETRY_MS);
+					Thread.sleep(Math.min(STARTING_CONNECT_RETRY_MS, deadline.remainingMillis()));
 				} catch (InterruptedException interrupted) {
 					Thread.currentThread().interrupt();
 					throw new AutomationException(
@@ -343,12 +362,16 @@ final class ControllerWorkerSession {
 	}
 
 	Json sessionInfo() throws Exception {
+		return sessionInfo(Json.object());
+	}
+
+	Json sessionInfo(Json arguments) throws Exception {
 		WorkerProcess worker = requireActiveWorker();
 
 		return Json.object()
 			.set("app", worker.entry.toJson())
 			.set("worker", worker.toJson())
-			.set("state", callWorker(worker, "session", Json.object(), false));
+			.set("state", callWorker(worker, "session", arguments, false));
 	}
 
 	private static String logCursor(WorkerProcess worker, long offset) {
@@ -541,7 +564,7 @@ final class ControllerWorkerSession {
 		return callWorker(
 			worker,
 			"observe",
-			Json.object()
+			arguments.dup()
 				.set("includeImage", arguments.at("includeImage", false).asBoolean()),
 			false);
 	}
@@ -606,7 +629,7 @@ final class ControllerWorkerSession {
 
 	Json captureSnapshot(Json arguments) throws Exception {
 		WorkerProcess worker = requireActiveWorker();
-		Json observe = callWorker(worker, "observe", Json.object().set("includeImage", true), false);
+		Json observe = callWorker(worker, "observe", arguments.dup().set("includeImage", true), false);
 		String imageBase64 = observe.at("imageBase64") == null
 			? null
 			: observe.at("imageBase64").asString();

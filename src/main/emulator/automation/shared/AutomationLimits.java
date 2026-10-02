@@ -7,7 +7,7 @@ package emulator.automation.shared;
  * INVALID_REQUEST.
  */
 public final class AutomationLimits {
-	public static final int MAX_WAIT_MS = 120000;
+	public static final int MAX_WAIT_MS = 600000;
 	public static final int DEFAULT_TIMEOUT_MS = 5000;
 
 	public static final int MIN_KEY_DURATION_MS = 10;

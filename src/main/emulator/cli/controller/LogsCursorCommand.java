@@ -4,7 +4,8 @@ import emulator.cli.core.CliCommand;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
-import emulator.cli.output.CliResponses;
+import emulator.automation.shared.OperationDeadline;
+import emulator.cli.app.AgentCalls;
 import mjson.Json;
 
 public final class LogsCursorCommand implements CliCommand {
@@ -14,16 +15,12 @@ public final class LogsCursorCommand implements CliCommand {
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
 		ControllerLifecycle.requireTokenCount(invocation.tokens(), 2, "logs cursor", invocation.json());
-		ControllerStatus status = ControllerLifecycle.requireRunningController("logs cursor", invocation.json());
-		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
-			ControllerStatusService.controllerClient(status),
-			"logs.cursor",
-			Json.object(),
-			"logs cursor",
-			invocation.json()));
+		OperationDeadline deadline = invocation.deadline(10000L);
+		ControllerStatus status = ControllerLifecycle.requireRunningController("logs cursor", invocation.json(), deadline);
+		Json payload = AgentCalls.call(invocation, ControllerStatusService.controllerClient(status), deadline,
+			"logs.cursor", Json.object(), "logs cursor");
 		return new CommandResult(
 			"logs cursor",
-			payload.at("cursor").asString(),
 			payload,
 			invocation.json());
 	}

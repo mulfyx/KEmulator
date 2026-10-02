@@ -1,47 +1,66 @@
-# KEmulator CLI test suite
+# KEmulator agent CLI tests
 
-Single entrypoint:
+Run the packaged CLI through the single entrypoint:
 
 ```bash
-./automation/run-cli-tests.sh                 # full run + coverage gate
-./automation/run-cli-tests.sh -k resize -x    # partial run (gate off)
-./automation/run-cli-tests.sh --release-dir /tmp/rel   # reuse a built bundle
+./automation/run-cli-tests.sh                         # full suite and coverage gate
+./automation/run-cli-tests.sh -k two_fields -x         # focused run, gate disabled
+./automation/run-cli-tests.sh --release-dir /tmp/rel   # reuse a built release
 ```
 
-The runner builds the release bundle **once**, prepares the fixture pack
-**once** (outside the bundle), then runs pytest over this directory.
-Requires Linux, `xvfb-run`, JDK 8+, and `python3` with `pytest`.
+The runner builds the release once, prepares the fixture pack outside the
+bundle, and runs pytest. It requires Linux, JDK 8, `xvfb-run`, and Python 3
+with `pytest`. PNG pixel checks use the Python standard library.
 
-## Layout
+The public command and result contract is [CliAutomation.md](../../CliAutomation.md).
+Tests invoke its actual commands through `KemuCli`; the wrapper does not
+translate removed commands or recreate obsolete response shapes.
 
-- `kemu.py` — `KemuCli` wrapper around `kemu.sh --json`; records every
-  exercised public command.
-- `conftest.py` — session fixtures: release bundle, fixture pack, controller
-  lifecycle (`kemu` shared session, `kemu_factory` for isolated sessions),
-  `workdir` for writable storage roots.
-- `test_*.py` — scenarios grouped by domain.
-- `test_zz_coverage.py` — fails the full run when a command advertised by
-  `kemu help` was never exercised.
+## Test setup
 
-Fixture MIDlets live in `../test-fixtures/src/fixtures/`;
-`../test-fixtures/build-fixtures.sh` compiles them once and packages one JAR
-per `*.mf` manifest; `../test-fixtures/prepare-cli-fixtures.sh` derives the
-descriptor/JAR variants and writes `fixtures.env`.
+`KEMU_RELEASE_DIR` selects a built release, and `KEMU_FIXTURES_ENV` selects
+`fixtures.env` from `prepare-cli-fixtures.sh`. The runner supplies both.
+`KEMU_COVERAGE_CHECK=1` enables the full-run gate against the advertised
+`help` commands. `KEMU_NO_BRIDGE=1` runs the wrapper through one-shot calls.
+Individual scenarios also exercise both transports explicitly.
 
-## Rules (how this layer stays sane)
+`kemu` is a shared session with a fresh app per test. `kemu_factory()` creates
+isolated sessions for worker failures and permission policy tests. A session
+starts automatically on `open`; teardown closes apps, stops sessions and ends
+bridge processes. Tests that require a fresh permission prompt use an isolated
+session because a remembered decision can survive reopening an app.
 
-1. **Never build the product inside a test.** The runner owns the build;
-   tests get `KEMU_RELEASE_DIR`.
-2. **Never write into the release bundle.** Worker `--data-dir`/`--file-root`
-   and any output files go under the `workdir` fixture (explicit roots that
-   overlap the bundle are rejected by the CLI anyway).
-3. **Go through `KemuCli`** (`kemu.ok(...)` / `kemu.err(..., code=...)`), so
-   the JSON envelope contract is asserted uniformly and the coverage gate
-   sees the command.
-4. **New CLI command ⇒ new test.** The coverage gate fails a full run for
-   any command present in `kemu help` but absent from the tests.
-5. **Don't leak state.** Tests using the shared `kemu` session must tolerate
-   a fresh app (an autouse fixture force-closes leftovers); tests that kill
-   or wedge workers use `kemu_factory()` for an isolated controller.
-6. **No sleeps for synchronization** — use `wait display/frame/idle/log/...`
-   CLI primitives, mirroring the automation contract itself.
+`kemu.ok(...)` or `kemu.done(...)` requires `outcome: done` and returns the
+public result. `kemu.pending(...)` requires an actionable permission and
+`outcome: pending`; `kemu.err(..., code=...)` requires the specified error.
+Every wrapped response checks the envelope and meaningful process exit code.
+A pending action is answered through its permission ref, then observed or
+waited for; it is never submitted a second time.
+
+Find targets by role and label through `node`, `node_ref`, and `command_ref`.
+Refs are opaque; tests check live identity without knowing their token format.
+Keep writable roots and output files under `workdir`, outside the release.
+
+## Fixtures and evidence
+
+Fixture sources live in `../test-fixtures/src/fixtures/`. The build script
+compiles them once and packages each readable `*.mf` manifest. The prepare
+script adds archive/JAD/property variants and writes `fixtures.env`.
+
+`AGENT_CONTRACT_JAR` supplies two editable fields, command replacement,
+List/Choice structural changes, permission and slow input callbacks, two
+colored Canvases, GameCanvas repaint/partial flush, and an Alert.
+`SLOW_STARTUP_JAR` deliberately delays `startApp()` beyond a short open budget.
+The existing fixtures cover controls, lifecycle, files, RMS, descriptors and
+worker failures.
+
+Use public `wait screen/frame/ready/exit/permission/log` conditions and app log
+markers as barriers. Bounded delays inside the slow fixtures are test inputs;
+OS process polling verifies cleanup. Avoid sleeps to synchronize UI actions.
+Pixel assertions decode actual PNG bytes. Storage rejection compares actual
+saved bytes, and cleanup checks the worker, controller and its private display.
+
+The full-run gate requires a successful invocation of every command advertised
+by `help`; partial selections leave it disabled. Add a consumer-visible test
+when adding a public command, and preserve independent expected facts from the
+fixture or public contract instead of copying production constants or source.

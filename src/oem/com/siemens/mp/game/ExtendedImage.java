@@ -45,9 +45,7 @@ public class ExtendedImage extends com.siemens.mp.misc.NativeMem {
 	public void blitToScreen(int x, int y) {
 		Displayable current = Display.getDisplay(null).getCurrent();
 		if (current instanceof Canvas) {
-			Graphics g = new Graphics(Emulator.getEmulator().getScreen().getBackBufferImage(), Emulator.getEmulator().getScreen().getXRayScreenImage());
-			g.drawImage(image, x, y, 0);
-			Emulator.getEventQueue().gameGraphicsFlush();
+			Emulator.getEventQueue().gameGraphicsBlit(current, image, x, y);
 		}
 	}
 

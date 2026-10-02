@@ -17,8 +17,13 @@ json_escape() {
 }
 
 LITERAL_ARGS=0
+SKIP_GLOBAL_VALUE=0
 for arg in "$@"; do
-	if [[ "$LITERAL_ARGS" == "0" && "$arg" == "--" ]]; then
+	if [[ "$SKIP_GLOBAL_VALUE" == "1" ]]; then
+		SKIP_GLOBAL_VALUE=0
+	elif [[ "$LITERAL_ARGS" == "0" && ( "$arg" == "--session" || "$arg" == "--timeout" ) ]]; then
+		SKIP_GLOBAL_VALUE=1
+	elif [[ "$LITERAL_ARGS" == "0" && "$arg" == "--" ]]; then
 		LITERAL_ARGS=1
 	elif [[ "$LITERAL_ARGS" == "0" && "$arg" == "--json" ]]; then
 		JSON_MODE=1
@@ -32,7 +37,7 @@ emit_bootstrap_error() {
 	local message="$2"
 
 	if [[ "$JSON_MODE" -eq 1 ]]; then
-		printf '{"ok":false,"command":%s,"error":{"code":"%s","message":"%s"}}\n' \
+		printf '{"command":%s,"outcome":"error","error":{"code":"%s","message":"%s"}}\n' \
 			"$COMMAND_JSON" \
 			"$(json_escape "$code")" \
 			"$(json_escape "$message")"
@@ -143,10 +148,10 @@ build_classpath() {
 		classpath="$classpath:$jar_file"
 	done
 
-	printf '%s\n' "$classpath"
+	CLASSPATH="$classpath"
 }
 
-CLASSPATH="$(build_classpath)"
+build_classpath
 
 exec "$JAVA_BIN" \
 	-Dkemu.root="$ROOT_DIR" \

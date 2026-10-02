@@ -2,6 +2,7 @@ package emulator.automation.worker;
 
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
+import emulator.automation.shared.OperationDeadline;
 import java.util.concurrent.TimeUnit;
 import mjson.Json;
 
@@ -11,11 +12,11 @@ final class WorkerWaits {
 
 	private static long timeout(Json request) {
 		long timeoutMs = request.at("timeoutMs", 5000L).asLong();
-		if (timeoutMs < 0L || timeoutMs > emulator.automation.shared.AutomationLimits.MAX_WAIT_MS) {
+		if (timeoutMs < 0L || timeoutMs > emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS) {
 			throw new AutomationException(
 				AutomationErrorCodes.INVALID_REQUEST,
 				"timeoutMs must be between 0 and "
-					+ emulator.automation.shared.AutomationLimits.MAX_WAIT_MS);
+					+ emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS);
 		}
 		return timeoutMs;
 	}
@@ -27,7 +28,7 @@ final class WorkerWaits {
 		}
 		if (request.has("kind")
 			&& !request.at("kind").isNull()
-			&& !request.at("kind").asString().equals(displayable.at("kind", "").asString())) {
+			&& !request.at("kind").asString().replace('_', '-').equals(displayable.at("kind", "").asString().replace('_', '-'))) {
 			return false;
 		}
 		if (request.has("title")
@@ -61,7 +62,18 @@ final class WorkerWaits {
 			&& state.at("revision", 0L).asLong() <= request.at("afterRevision").asLong()) {
 			return false;
 		}
+		if (request.has("text") && !containsText(state.at("ui", displayable), request.at("text").asString())) return false;
 		return true;
+	}
+
+	private static boolean containsText(Json node, String wanted) {
+		if (node.isArray()) { for (Json child : node.asJsonList()) if (containsText(child, wanted)) return true; }
+		else if (node.isObject()) {
+			for (String key : new String[]{"label", "value", "title", "ticker", "text"})
+				if (node.has(key) && node.at(key).isString() && node.at(key).asString().contains(wanted)) return true;
+			for (String key : new String[]{"nodes", "commands"}) if (node.has(key) && containsText(node.at(key), wanted)) return true;
+		}
+		return false;
 	}
 
 	private static boolean permissionMatches(Json state, Json request) {
@@ -83,7 +95,7 @@ final class WorkerWaits {
 			return displayMatches(state, request);
 		}
 		if ("worker-ready".equals(type)) {
-			return state.at("ready", false).asBoolean();
+			return state.at("ready", false).asBoolean() && state.at("permissionRequest", Json.nil()).isNull();
 		}
 		if ("permission".equals(type)) {
 			return permissionMatches(state, request);
@@ -102,11 +114,12 @@ final class WorkerWaits {
 			return waitForFrame(request);
 		}
 		long timeoutMs = timeout(request);
+		OperationDeadline deadline = OperationDeadline.afterMillis(timeoutMs);
 		long start = System.nanoTime();
 		Json last = Json.object();
 		while (true) {
 			long cursor = WorkerEventModel.cursor();
-			last = WorkerSessionSnapshot.build(false);
+			last = WorkerSessionSnapshot.build(false, Math.max(1L, deadline.remainingMillis()));
 			if (matches(type, last, request)) {
 				return Json.object()
 					.set("condition", type)

@@ -283,6 +283,24 @@ public class ListSWT extends SWTScreen implements IListImpl {
 		return choiceImpl.size();
 	}
 
+	public Object automationLock() {
+		return choiceImpl;
+	}
+
+	public Object automationRowIdentity(int index) {
+		return choiceImpl.automationIdentity(index);
+	}
+
+	public boolean automationSelect(Object identity, int index, boolean selected) {
+		synchronized (choiceImpl) {
+			if (index < 0 || index >= choiceImpl.size()
+					|| identity != choiceImpl.automationIdentity(index)) return false;
+			choiceImpl.setSelected(index, selected);
+		}
+		updateSelection();
+		return true;
+	}
+
 	protected Composite _constructSwtContent(int style) {
 		Composite c = super._constructSwtContent(style);
 		swtTable = new Table(c, getStyle(type));

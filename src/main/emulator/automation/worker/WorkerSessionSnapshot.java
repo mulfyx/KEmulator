@@ -185,6 +185,10 @@ final class WorkerSessionSnapshot {
 	}
 
 	static Json build(final boolean includeImage) {
+		return build(includeImage, 5000L);
+	}
+
+	static Json build(final boolean includeImage, final long timeoutMs) {
 		return WorkerFrontendThread.call(new Callable<Json>() {
 			public Json call() throws Exception {
 				Json result = Json.object();
@@ -197,7 +201,7 @@ final class WorkerSessionSnapshot {
 				result.set("revision", WorkerEventModel.revision());
 				result.set("frameRevision", WorkerEventModel.frameRevision());
 				result.set("eventCursor", WorkerEventModel.cursor());
-				result.set("ready", WorkerRuntimeState.isMidletStarted() && current != null);
+				result.set("ready", current != null);
 				result.set("midletStarted", WorkerRuntimeState.isMidletStarted());
 				result.set(
 					"jarName",
@@ -206,7 +210,9 @@ final class WorkerSessionSnapshot {
 				result.set("height", screen == null ? 0 : screen.getHeight());
 				Json displayable = buildDisplayable(current);
 				WorkerPermissions.PendingPermission permission = WorkerPermissions.snapshot();
-				result.set("permissionRequest", permission == null ? null : permission.toJson());
+				Json permissionJson = permission == null ? Json.nil() : permission.toJson();
+				if (permission != null) permissionJson.set("ref", WorkerTargets.permissionRef(permission));
+				result.set("permissionRequest", permissionJson);
 
 				Json softkeys = Json.object();
 				softkeys.set("left", AutomationStateExtractor.getLeftSoftLabel(current));
@@ -234,6 +240,7 @@ final class WorkerSessionSnapshot {
 					displayable.set("maxSize", textBox.getMaxSize());
 				}
 				result.set("displayable", displayable);
+				result.set("ui", WorkerUiModel.build(current));
 
 				result.set(
 					"jvmOptions",
@@ -253,6 +260,6 @@ final class WorkerSessionSnapshot {
 
 				return result;
 			}
-		});
+		}, timeoutMs);
 	}
 }

@@ -67,7 +67,7 @@ final class HelpCommand implements CliCommand {
 			payload.set("commands", commands);
 		}
 
-		return new CommandResult("help", usage, payload, invocation.json());
+		return new CommandResult("help", payload, invocation.json());
 	}
 
 	private static List<String> resolveTopicTokens(List<String> tokens) {

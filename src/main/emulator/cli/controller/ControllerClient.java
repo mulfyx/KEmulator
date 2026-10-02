@@ -3,6 +3,7 @@ package emulator.cli.controller;
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationErrorPayloads;
 import emulator.automation.shared.AutomationRemoteException;
+import emulator.automation.shared.OperationDeadline;
 import emulator.automation.shared.TextValues;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -40,11 +41,11 @@ public final class ControllerClient {
 
 	private int readTimeoutFor(String operation, Json request) {
 		if ("health".equals(operation)) {
-			return HEALTH_READ_TIMEOUT_MS;
+			return (int) Math.max(1L, Math.min(HEALTH_READ_TIMEOUT_MS, request.at("timeoutMs", HEALTH_READ_TIMEOUT_MS).asLong()));
 		}
 
 		if ("shutdown".equals(operation)) {
-			return SHUTDOWN_READ_TIMEOUT_MS;
+			return (int) Math.max(1L, Math.min(SHUTDOWN_READ_TIMEOUT_MS, request.at("timeoutMs", SHUTDOWN_READ_TIMEOUT_MS).asLong()));
 		}
 
 		if (request != null
@@ -54,9 +55,11 @@ public final class ControllerClient {
 			// The CLI slack must exceed the controller->worker slack so the
 			// inner deadline always fires first.
 			long requested = request.at("timeoutMs").asLong() + 5000L;
-			if (requested > DEFAULT_READ_TIMEOUT_MS) {
-				return requested > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) requested;
-			}
+			return (int) Math.max(1L, Math.min(Integer.MAX_VALUE, requested));
+		}
+		if (request != null && request.isObject() && request.has("openTimeoutMs")) {
+			return (int) Math.max(1L, Math.min(Integer.MAX_VALUE,
+				request.at("openTimeoutMs").asLong() + 5000L));
 		}
 
 		return DEFAULT_READ_TIMEOUT_MS;
@@ -94,16 +97,27 @@ public final class ControllerClient {
 	}
 
 	private Json post(String operation, Json request) throws IOException {
+		long defaultBudget =
+			"health".equals(operation) ? HEALTH_READ_TIMEOUT_MS
+				: "shutdown".equals(operation) ? SHUTDOWN_READ_TIMEOUT_MS : DEFAULT_READ_TIMEOUT_MS;
+		if (request != null && request.has("openTimeoutMs")) {
+			defaultBudget = request.at("openTimeoutMs").asLong();
+		}
+		OperationDeadline deadline = OperationDeadline.fromRequest(request, defaultBudget);
 		Socket socket = new Socket();
+		boolean sent = false;
 		try {
 			try {
-				socket.connect(new InetSocketAddress(host, port), CONNECT_TIMEOUT_MS);
-				socket.setSoTimeout(readTimeoutFor(operation, request));
+				socket.connect(new InetSocketAddress(host, port),
+					(int) Math.max(1L, Math.min(CONNECT_TIMEOUT_MS, deadline.remainingMillis())));
+				Json remainingRequest = deadline.withRemaining(request);
+				socket.setSoTimeout(readTimeoutFor(operation, remainingRequest));
 				Json envelope = Json.object()
 					.set("id", UUID.randomUUID().toString())
 					.set("op", operation)
-					.set("args", request == null ? Json.object() : request);
+					.set("args", remainingRequest);
 				OutputStream out = socket.getOutputStream();
+				sent = true;
 				out.write((envelope.toString() + '\n').getBytes(StandardCharsets.UTF_8));
 				out.flush();
 				BufferedReader reader = new BufferedReader(
@@ -154,7 +168,9 @@ public final class ControllerClient {
 				throw controllerFailure(
 					AutomationErrorCodes.TIMEOUT,
 					"Timed out waiting for controller operation: " + operation,
-					requestContext(operation, Json.object().set("cause", e.getMessage())),
+					requestContext(operation, Json.object().set("cause", e.getMessage())
+						.set("effectUnknown", sent && !isReadOnly(operation))
+						.set("reason", sent ? "controller-response-timeout" : "controller-connect-timeout")),
 					e);
 			} catch (IOException e) {
 				throw controllerFailure(
@@ -169,6 +185,13 @@ public final class ControllerClient {
 			} catch (IOException ignored) {
 			}
 		}
+	}
+
+	private static boolean isReadOnly(String operation) {
+		return "health".equals(operation) || "app.state".equals(operation) || "app.session".equals(operation)
+			|| "app.current".equals(operation) || "app.observe".equals(operation)
+			|| "app.agent.observe".equals(operation) || "app.screenshot".equals(operation)
+			|| operation.startsWith("app.wait") || operation.startsWith("logs");
 	}
 
 	public boolean ping() throws IOException {

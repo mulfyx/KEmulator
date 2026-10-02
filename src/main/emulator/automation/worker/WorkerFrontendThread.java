@@ -1,14 +1,23 @@
 package emulator.automation.worker;
 
 import emulator.Emulator;
+import emulator.automation.shared.AutomationErrorCodes;
+import emulator.automation.shared.AutomationException;
 import emulator.ui.swt.SWTFrontend;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import mjson.Json;
 
 final class WorkerFrontendThread {
 	private WorkerFrontendThread() {
 	}
 
 	private static RuntimeException propagate(Throwable error) {
+		if (error instanceof Error) throw (Error) error;
 		if (error instanceof RuntimeException) {
 			return (RuntimeException) error;
 		}
@@ -16,31 +25,57 @@ final class WorkerFrontendThread {
 		return new RuntimeException(error);
 	}
 
-	@SuppressWarnings("unchecked")
 	static <T> T call(final Callable<T> callable) {
-		if (Emulator.getEmulator() instanceof SWTFrontend) {
-			final Object[] result = new Object[1];
-			final Throwable[] error = new Throwable[1];
-			SWTFrontend.syncExec(new Runnable() {
-				public void run() {
-					try {
-						result[0] = callable.call();
-					} catch (Throwable t) {
-						error[0] = t;
+		return call(callable, 5000L);
+	}
+
+	static <T> T call(final Callable<T> callable, long timeoutMs) {
+		if (Emulator.getEmulator() instanceof SWTFrontend
+				&& org.eclipse.swt.widgets.Display.getCurrent() != SWTFrontend.getDisplay()) {
+			final Object startLock = new Object();
+			final AtomicBoolean started = new AtomicBoolean();
+			final AtomicBoolean abandoned = new AtomicBoolean();
+			FutureTask<T> task = new FutureTask<T>(new Callable<T>() {
+				public T call() throws Exception {
+					synchronized (startLock) {
+						if (abandoned.get()) return null;
+						started.set(true);
 					}
+					return callable.call();
 				}
 			});
-			if (error[0] != null) {
-				throw propagate(error[0]);
+			if (timeoutMs <= 0) throw timeout(false, null);
+			SWTFrontend.getDisplay().asyncExec(task);
+			try {
+				return task.get(timeoutMs, TimeUnit.MILLISECONDS);
+			} catch (TimeoutException failure) {
+				synchronized (startLock) {
+					abandoned.set(true);
+					task.cancel(false);
+				}
+				throw timeout(started.get(), failure);
+			} catch (InterruptedException failure) {
+				synchronized (startLock) {
+					abandoned.set(true);
+					task.cancel(false);
+				}
+				Thread.currentThread().interrupt();
+				throw timeout(started.get(), failure);
+			} catch (ExecutionException failure) {
+				throw propagate(failure.getCause());
 			}
-
-			return (T) result[0];
 		}
-
 		try {
 			return callable.call();
 		} catch (Exception e) {
-			throw new RuntimeException(e);
+			throw propagate(e);
 		}
+	}
+
+	private static AutomationException timeout(boolean started, Throwable cause) {
+		return new AutomationException(AutomationErrorCodes.TIMEOUT,
+			started ? "The frontend callback did not finish within the operation budget."
+				: "The frontend queue did not start the request within the operation budget.",
+			Json.object().set("phase", "frontend-queue").set("effect", started ? "unknown" : "none"), cause);
 	}
 }

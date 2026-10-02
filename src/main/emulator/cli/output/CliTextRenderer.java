@@ -1,499 +1,169 @@
 package emulator.cli.output;
 
-import emulator.automation.shared.TextValues;
-import emulator.cli.controller.ControllerStatus;
-import emulator.cli.library.*;
-import emulator.cli.support.KemuPaths;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import mjson.Json;
 
+/** Human rendering of the same public envelope emitted by --json. */
 public final class CliTextRenderer {
-	private CliTextRenderer() {
+	private static final Map<String, String> USAGE = new LinkedHashMap<String, String>();
+	static {
+		USAGE.put("help", "help [COMMAND...]");
+		USAGE.put("open", "open APP [--midlet N] [--headless|--visible] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR] [--reset-state] [--reset-file-root] [--worker-xmx SIZE]");
+		USAGE.put("inspect", "inspect APP");
+		USAGE.put("observe", "observe [--screenshot FILE]");
+		USAGE.put("screenshot", "screenshot [FILE]");
+		for (String name : new String[]{"status", "close", "stop", "pause", "resume", "rotate", "bridge"}) USAGE.put(name, name);
+		USAGE.put("activate", "activate REF");
+		USAGE.put("select", "select REF [--off]");
+		USAGE.put("set", "set REF VALUE");
+		USAGE.put("resize", "resize WIDTHxHEIGHT");
+		USAGE.put("key", "key <press|hold|down|up> KEY [--duration MS] [--observe]");
+		for (String action : new String[]{"press", "hold", "down", "up"}) USAGE.put("key " + action, "key " + action + " KEY [--duration MS] [--observe]");
+		USAGE.put("pointer", "pointer <tap|down|up> X Y [--observe]");
+		for (String action : new String[]{"tap", "down", "up"}) USAGE.put("pointer " + action, "pointer " + action + " X Y [--observe]");
+		USAGE.put("drag", "drag X1 Y1 X2 Y2 ... [--delay MS] [--observe]");
+		USAGE.put("wait", "wait <screen|ready|exit|frame|permission|log> [OPTIONS]");
+		USAGE.put("wait screen", "wait screen [--kind KIND] [--title TITLE] [--title-regex REGEX] [--text TEXT]");
+		USAGE.put("wait ready", "wait ready"); USAGE.put("wait exit", "wait exit");
+		USAGE.put("wait frame", "wait frame [--after FRAME_ID]");
+		USAGE.put("wait permission", "wait permission [--name NAME]");
+		USAGE.put("wait log", "wait log --regex REGEX [--since CURSOR]");
+		USAGE.put("permission", "permission <allow|deny> REF [--remember]");
+		USAGE.put("permission allow", "permission allow REF [--remember]");
+		USAGE.put("permission deny", "permission deny REF");
+		USAGE.put("logs", "logs [--since CURSOR] [--jsonl]"); USAGE.put("logs cursor", "logs cursor");
+		USAGE.put("storage", "storage <snapshot|restore> FILE\n  kemu storage rms <reset|export|import> [FILE]");
+		USAGE.put("storage snapshot", "storage snapshot FILE"); USAGE.put("storage restore", "storage restore FILE");
+		USAGE.put("storage rms", "storage rms <reset|export|import> [FILE]");
+		for (String action : new String[]{"reset", "export", "import"}) USAGE.put("storage rms " + action, "storage rms " + action + ("reset".equals(action) ? "" : " FILE"));
 	}
+	private CliTextRenderer() { }
 
-	private static String trimTrailingNewline(StringBuilder value) {
-		if (value.length() > 0 && value.charAt(value.length() - 1) == '\n') {
-			value.setLength(value.length() - 1);
-		}
-
-		return value.toString();
-	}
-
-	private static boolean hasDevRuntime(Path root) {
-		return Files.isRegularFile(root.resolve("out/classes-linux/emulator/cli/KEmulator.class"))
-			&& Files.isRegularFile(root.resolve("out/classes-linux/emulator/cli/KemuMain.class"))
-			&& Files.isRegularFile(
-				root.resolve("out/classes-linux/emulator/automation/controller/AutomationControllerMain.class"))
-			&& Files.isRegularFile(
-				root.resolve("out/classes-linux/emulator/automation/worker/AutomationWorkerMain.class"));
-	}
-
-	private static boolean hasReleaseRuntime(Path root) {
-		return Files.isRegularFile(root.resolve("KEmulator.jar"))
-			|| Files.isRegularFile(root.resolve("dist/release-linux/KEmulator.jar"));
-	}
-
-	private static String joinRuntimeChoices(ArrayList<String> values) {
-		StringBuilder out = new StringBuilder();
-		for (int i = 0; i < values.size(); i++) {
-			if (i > 0) {
-				out.append('|');
-			}
-
-			out.append(values.get(i));
-		}
-
-		return out.toString();
-	}
-
-	private static String runtimeUsageChoices() {
-		String configured = TextValues.trimToNull(System.getProperty("kemu.bootstrap.availableRuntimes"));
-		if (configured != null) {
-			return configured;
-		}
-
-		ArrayList<String> available = new ArrayList<String>();
-		Path root = KemuPaths.rootDir();
-		if (hasDevRuntime(root)) {
-			available.add("dev-linux");
-		}
-
-		if (hasReleaseRuntime(root)) {
-			available.add("release");
-		}
-
-		if (!available.isEmpty()) {
-			return joinRuntimeChoices(available);
-		}
-
-		String bootstrapRuntime = TextValues.trimToNull(System.getProperty("kemu.bootstrap.runtime"));
-		if (bootstrapRuntime != null) {
-			return bootstrapRuntime;
-		}
-
-		return "dev-linux|release";
-	}
-
-	private static final String[] ROOT_TOPICS = {
-		"help", "bridge", "start", "status", "stop", "logs", "inspect", "open", "close",
-		"state", "rms", "observe", "events", "screenshot", "wait", "key",
-		"pointer", "drag", "list", "choice", "gauge", "text-field", "text-box",
-		"resize", "rotate", "pause", "resume", "date-field", "command run", "permission",
-	};
+	public static boolean hasUsageTopic(String topic) { return USAGE.containsKey(topic); }
 
 	public static String usageText() {
-		StringBuilder out = new StringBuilder("Usage:\n");
-		for (String topic : ROOT_TOPICS) {
-			for (String line : usageLine(topic).split("\n")) {
-				out.append("  kemu ").append(line.replaceFirst("^\\s*kemu ", "")).append('\n');
-			}
-		}
-
-		out.append('\n')
-			.append("Notes:\n")
-			.append("  CLI automation contract is currently Linux-only.\n")
-			.append("  Use `kemu <command> --help` or `kemu help <command...>` for command-specific usage.\n")
-			.append("  Path-first workflow is canonical: inspect/open <path>.\n");
-
-		return out.toString();
-	}
-
-	private static String usageLine(String topic) {
-		if ("help".equals(topic))
-			return "kemu help [command...] [--json]";
-		if ("bridge".equals(topic))
-			return "kemu bridge  (JSONL: one {\"id\", \"argv\": [...]} request per stdin line)";
-		if ("start".equals(topic))
-			return "kemu start [--headless|--visible] [--runtime " + runtimeUsageChoices() + "] [--size WxH] [--json]";
-		if ("status".equals(topic))
-			return "kemu status [--json]";
-		if ("stop".equals(topic))
-			return "kemu stop [--force] [--json]";
-		if ("logs".equals(topic))
-			return "kemu logs cursor [--json]\n"
-				+ "       kemu logs read [--since CURSOR] [--jsonl] [--json]";
-		if ("logs cursor".equals(topic))
-			return "kemu logs cursor [--json]";
-		if ("logs read".equals(topic))
-			return "kemu logs read [--since CURSOR] [--jsonl] [--json]";
-		if ("inspect".equals(topic))
-			return "kemu inspect <path> [--json]";
-		if ("open".equals(topic))
-			return "kemu open <path> [--midlet N] [--headless|--visible] [--runtime " + runtimeUsageChoices()
-				+ "] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR]"
-				+ " [--reset-state] [--reset-file-root] [--worker-xmx SIZE]"
-				+ " [--wait-ready] [--open-timeout MS] [--json]";
-		if ("close".equals(topic))
-			return "kemu close [--json]";
-		if ("state".equals(topic))
-			return "kemu state [--json]\n"
-				+ "       kemu state <snapshot|restore> FILE [--json]";
-		if ("rms".equals(topic))
-			return "kemu rms reset [--json]\n"
-				+ "       kemu rms <export|import> FILE [--json]";
-		if ("observe".equals(topic))
-			return "kemu observe [--screenshot FILE] [--json]";
-		if ("events".equals(topic))
-			return "kemu events read [--since CURSOR] [--jsonl] [--json]";
-		if ("screenshot".equals(topic))
-			return "kemu screenshot FILE [--json]";
-		if ("wait".equals(topic))
-			return "kemu wait display [--kind KIND] [--title TITLE] [--title-regex REGEX]"
-				+ " [--selected-index N] [--after-revision REV] [--timeout MS] [--json]\n"
-				+ "       kemu wait <worker-ready|worker-exit|idle> [--timeout MS] [--json]\n"
-				+ "       kemu wait frame --after-revision REV [--timeout MS] [--json]\n"
-				+ "       kemu wait permission [--name NAME] [--timeout MS] [--json]\n"
-				+ "       kemu wait log --regex REGEX [--since CURSOR] [--timeout MS] [--json]";
-		if ("wait display".equals(topic))
-			return "kemu wait display [--kind KIND] [--title TITLE] [--title-regex REGEX]"
-				+ " [--selected-index N] [--after-revision REV] [--timeout MS] [--json]";
-		if ("wait worker-ready".equals(topic)
-			|| "wait worker-exit".equals(topic)
-			|| "wait idle".equals(topic))
-			return "kemu " + topic + " [--timeout MS] [--json]";
-		if ("wait frame".equals(topic))
-			return "kemu wait frame --after-revision REV [--timeout MS] [--json]";
-		if ("wait log".equals(topic))
-			return "kemu wait log --regex REGEX [--since CURSOR] [--timeout MS] [--json]";
-		if ("wait permission".equals(topic))
-			return "kemu wait permission [--name NAME] [--timeout MS] [--json]";
-		if ("key".equals(topic))
-			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]\n"
-				+ "       kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]\n"
-				+ "       kemu key <down|up> <key> [--wait-dispatched] [--json]";
-		if ("key down".equals(topic) || "key up".equals(topic))
-			return "kemu " + topic + " <key> [--wait-dispatched] [--json]";
-		if ("key press".equals(topic))
-			return "kemu key press <key> [--duration MS] [--wait-dispatched] [--json]";
-		if ("key hold".equals(topic))
-			return "kemu key hold <key> [--duration MS] [--wait-dispatched] [--wait-release] [--json]";
-		if ("pointer".equals(topic))
-			return "kemu pointer tap <x> <y> [--wait-dispatched] [--json]\n"
-				+ "       kemu pointer <down|up> <x> <y> [--wait-dispatched] [--json]";
-		if ("pointer tap".equals(topic) || "pointer down".equals(topic) || "pointer up".equals(topic))
-			return "kemu " + topic + " <x> <y> [--wait-dispatched] [--json]";
-		if ("drag".equals(topic))
-			return "kemu drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS] [--json]";
-		if ("list".equals(topic))
-			return "kemu list select INDEX [--expect-revision REV] [--timeout MS] [--json]\n"
-				+ "       kemu list move <up|down> [--count N] [--expect-revision REV] [--timeout MS] [--json]";
-		if ("list select".equals(topic))
-			return "kemu list select INDEX [--expect-revision REV] [--timeout MS] [--json]";
-		if ("list move".equals(topic))
-			return "kemu list move <up|down> [--count N] [--expect-revision REV] [--timeout MS] [--json]";
-		if ("choice".equals(topic) || "choice set".equals(topic))
-			return "kemu choice set INDEX [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
-		if ("gauge".equals(topic) || "gauge set".equals(topic))
-			return "kemu gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
-		if ("text-field".equals(topic) || "text-field set".equals(topic))
-			return "kemu text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS] [--json]";
-		if ("text-box".equals(topic) || "text-box set".equals(topic))
-			return "kemu text-box set TEXT [--expect-revision REV] [--timeout MS] [--json]";
-		if ("date-field".equals(topic) || "date-field set".equals(topic))
-			return "kemu date-field set EPOCH_MS [--item-index INDEX] [--expect-revision REV]"
-				+ " [--timeout MS] [--json]";
-		if ("pause".equals(topic) || "resume".equals(topic))
-			return "kemu " + topic + " [--expect-revision REV] [--timeout MS] [--json]";
-		if ("resize".equals(topic))
-			return "kemu resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
-		if ("rotate".equals(topic))
-			return "kemu rotate [--expect-revision REV] [--wait-frame] [--timeout MS] [--json]";
-		if ("command".equals(topic))
-			return "kemu command run <--id ID|--label LABEL> [--expect-revision REV]"
-				+ " [--wait-next-display] [--timeout MS] [--json]";
-		if ("command run".equals(topic))
-			return "kemu command run <--id ID|--label LABEL> [--expect-revision REV]"
-				+ " [--wait-next-display] [--timeout MS] [--json]";
-		if ("permission".equals(topic))
-			return "kemu permission <allow [--once|--always]|deny> [id] [--json]";
-		if ("events read".equals(topic))
-			return "kemu events read [--since CURSOR] [--jsonl] [--json]";
-		if ("rms reset".equals(topic))
-			return "kemu rms reset [--json]";
-		if ("rms export".equals(topic) || "rms import".equals(topic))
-			return "kemu " + topic + " FILE [--json]";
-		if ("state snapshot".equals(topic) || "state restore".equals(topic))
-			return "kemu " + topic + " FILE [--json]";
-		return null;
-	}
-
-	public static boolean hasUsageTopic(String topic) {
-		return usageLine(topic) != null;
+		return "KEmulator agent CLI (Linux)\n"
+			+ "Workflow: open APP -> observe -> activate/select/set REF -> wait/observe -> close -> stop\n\n"
+			+ "  kemu open APP\n  kemu inspect APP\n  kemu observe\n  kemu activate REF\n"
+			+ "  kemu select REF\n  kemu set REF VALUE\n  kemu key <press|hold|down|up> KEY\n"
+			+ "  kemu pointer <tap|down|up> X Y\n  kemu drag X1 Y1 X2 Y2 ...\n"
+			+ "  kemu wait <screen|ready|exit|frame|permission|log>\n  kemu permission <allow|deny> REF\n"
+			+ "  kemu status\n  kemu close\n  kemu stop\n  kemu pause\n  kemu resume\n"
+			+ "  kemu resize WxH\n  kemu rotate\n  kemu screenshot [FILE]\n  kemu logs [OPTIONS]\n"
+			+ "  kemu storage <snapshot|restore> FILE\n  kemu storage rms <reset|export|import> [FILE]\n  kemu bridge\n  kemu help [COMMAND...]\n"
+			+ "\nGlobal: --session NAME (or KEMU_SESSION), --json, --verbose, --timeout MS\n"
+			+ "Use kemu help COMMAND for options. Default output is a complete useful UI, not runtime diagnostics.";
 	}
 
 	public static String usageText(String topic) {
-		if (topic == null || topic.length() == 0) {
-			return usageText();
-		}
-
-		String usage = usageLine(topic);
-		if (usage == null) {
-			return usageText();
-		}
-
-		return "Usage: " + usage + "\nNote: CLI automation contract is currently Linux-only.";
+		String usage = USAGE.get(topic);
+		if (usage == null) return usageText();
+		String result = "Usage: kemu " + usage + "\nGlobal: --session NAME, --json, --verbose, --timeout MS";
+		if (topic.startsWith("key")) result += "\nKeys: 0-9, *, #, UP, DOWN, LEFT, RIGHT, FIRE, LSK, RSK.";
+		return result;
 	}
 
-	public static String renderStatus(ControllerStatus status) {
-		return renderStatus(status, status.toJson());
+	private static String text(Json value) { return value == null || value.isNull() ? "" : value.isString() ? value.asString() : value.toString(); }
+	private static String quoted(Json value) { return Json.make(text(value)).toString(); }
+	private static void line(StringBuilder out, String value) { if (value.length() > 0) out.append(value).append('\n'); }
+
+	private static void nodes(StringBuilder out, Json nodes, String indent) {
+		if (!nodes.isArray()) return;
+		for (Json node : nodes.asJsonList()) {
+			StringBuilder row = new StringBuilder(indent);
+			row.append(node.at("selected", false).asBoolean() ? "> " : "  ");
+			String ref = text(node.at("ref", Json.nil()));
+			if (ref.length() > 0) row.append(ref).append(' ');
+			row.append(text(node.at("role", "text")));
+			if (node.has("label")) row.append(' ').append(quoted(node.at("label")));
+			if (node.has("value")) row.append(": ").append(quoted(node.at("value")));
+			if (node.has("actions")) row.append(" [").append(join(node.at("actions"))).append(']');
+			if (node.has("constraints")) row.append(" ").append(join(node.at("constraints")));
+			if (node.has("maxLength")) row.append(" max ").append(node.at("maxLength"));
+			if (node.has("max")) row.append(" range ").append(node.at("min", 0)).append("..").append(node.at("max"));
+			if (node.has("softkey")) row.append(" softkey=").append(text(node.at("softkey")));
+			for (String key : new String[]{"owner", "type", "selection", "caret", "inputMode", "mode", "state", "canDeselect", "capabilities", "size", "image"})
+				if (node.has(key)) row.append(' ').append(key).append('=').append(text(node.at(key)));
+			if (node.at("focused", false).asBoolean()) row.append(" focused");
+			line(out, row.toString());
+			if (node.has("nodes")) nodes(out, node.at("nodes"), indent + "  ");
+		}
 	}
 
-	public static String renderStatus(ControllerStatus status, Json payload) {
-		if (!status.exists) {
-			return "No controller state file found.";
-		}
-
+	private static String join(Json values) {
+		if (!values.isArray()) return text(values);
 		StringBuilder out = new StringBuilder();
-		out.append("Controller state: ").append(status.source).append('\n');
-		out.append("State file: ").append(status.stateFile).append('\n');
-		out.append("Running: ").append(status.running).append('\n');
-		out.append("Reachable: ").append(status.reachable).append('\n');
-		if (status.pidAlive != null) {
-			out.append("PID alive: ").append(status.pidAlive.booleanValue()).append('\n');
-		}
-
-		if (status.degraded) {
-			out.append("Degraded: true").append('\n');
-		}
-
-		if (status.pid != null) {
-			out.append("Controller PID: ").append(status.pid).append('\n');
-		}
-
-		Json controllerJvmOptions = payload.at("controllerJvmOptions", Json.array());
-		if (controllerJvmOptions != null && controllerJvmOptions.isArray()) {
-			out.append("Controller JVM options: ").append(controllerJvmOptions).append('\n');
-		}
-
-		if (status.endpoint() != null) {
-			out.append("Endpoint: ").append(status.endpoint()).append('\n');
-		}
-
-		if (status.mode != null) {
-			out.append("Mode: ").append(status.mode).append('\n');
-		}
-
-		if (status.runtime != null) {
-			out.append("Runtime: ").append(status.runtime).append('\n');
-		}
-
-		if (status.screen != null) {
-			out.append("Screen: ").append(status.screen).append('\n');
-		}
-
-		if (status.logFile != null) {
-			out.append("Log file: ").append(status.logFile).append('\n');
-		}
-
-		if (payload.at("active", false).asBoolean()) {
-			Json worker = payload.at("worker", Json.object());
-			out.append("Worker PID: ").append(worker.at("pid", Json.nil())).append('\n');
-			out.append("Worker JVM options: ").append(worker.at("jvmOptions", Json.array())).append('\n');
-			out.append("MIDlet/emulated heap: ").append(worker.at("emulatedHeap", Json.nil())).append('\n');
-			out.append("Data dir: ").append(worker.at("dataDir", Json.nil())).append('\n');
-			out.append("RMS dir: ").append(worker.at("rmsDir", Json.nil())).append('\n');
-			out.append("File root: ").append(worker.at("fileRoot", Json.nil())).append('\n');
-		}
-
-		if (status.loadError != null) {
-			out.append("Load error: ").append(status.loadError).append('\n');
-		}
-
-		return trimTrailingNewline(out);
+		for (Json value : values.asJsonList()) { if (out.length() > 0) out.append(", "); out.append(text(value)); }
+		return out.toString();
 	}
 
-	public static String renderInspection(InspectionResult result) {
+	private static void permission(StringBuilder out, Json permission) {
+		if (!permission.isObject()) return;
+		String ref = text(permission.at("ref", permission.at("id", Json.nil())));
+		line(out, "Permission pending " + ref + (permission.has("id") ? " (request " + text(permission.at("id")) + ")" : "")
+			+ ": " + text(permission.at("name", "")));
+		line(out, text(permission.at("message", "")));
+		line(out, "Answer: kemu permission allow " + ref + " | kemu permission deny " + ref);
+		line(out, "The suspended action continues after the answer; do not repeat it.");
+	}
+
+	private static void view(StringBuilder out, Json view) {
+		if (!view.isObject()) return;
+		String kind = text(view.at("kind", "none"));
+		line(out, kind + " " + quoted(view.at("title", "")));
+		if (view.has("size")) line(out, "Screen: " + view.at("size").at("width", 0) + "x" + view.at("size").at("height", 0));
+		if (view.has("contentSize")) line(out, "Content: " + view.at("contentSize").at("width", 0) + "x" + view.at("contentSize").at("height", 0));
+		if (view.has("ticker")) line(out, "Ticker: " + text(view.at("ticker")));
+		if (view.has("selection")) line(out, "Selection: " + text(view.at("selection")));
+		if (view.has("timeout")) line(out, "Alert timeout: " + text(view.at("timeout")) + " ms");
+		nodes(out, view.at("nodes", Json.array()), "");
+		if (view.has("indicator")) { line(out, "Indicator:"); nodes(out, Json.array(view.at("indicator")), ""); }
+		if (!view.at("commands", Json.array()).asJsonList().isEmpty()) { line(out, "Commands:"); nodes(out, view.at("commands"), ""); }
+		Json image = view.at("image", Json.nil());
+		if (image.isObject()) line(out, "PNG: " + text(image.at("path")) + " (" + image.at("width") + "x" + image.at("height") + ", frame " + text(image.at("frameId")) + ")");
+	}
+
+	public static String render(Json envelope) {
 		StringBuilder out = new StringBuilder();
-		out.append("Path: ").append(result.inputPath).append('\n');
-		out.append("Kind: ").append(result.sourceKind).append('\n');
-		out.append("Display name: ").append(result.displayName).append('\n');
-		if (result.jarPath != null) {
-			out.append("Jar path: ").append(result.jarPath).append('\n');
-		}
-
-		if (result.jadPath != null) {
-			out.append("Descriptor path: ").append(result.jadPath).append('\n');
-		}
-
-		if (result.vendor != null) {
-			out.append("Vendor: ").append(result.vendor).append('\n');
-		}
-
-		if (result.version != null) {
-			out.append("Version: ").append(result.version).append('\n');
-		}
-
-		if (result.midlets.isEmpty()) {
-			out.append("Midlets: none");
+		if ("error".equals(text(envelope.at("outcome")))) {
+			Json error = envelope.at("error");
+			line(out, "Error " + text(error.at("code")) + ": " + text(error.at("message")));
+			Json details = error.at("details", Json.object());
+			if (details.at("effectUnknown", false).asBoolean()) line(out, "The action was sent; its effect is unknown. Observe before retrying.");
+			if (details.has("observation")) view(out, details.at("observation"));
+			Json facts = details.dup(); facts.delAt("observation");
+			if (!facts.asJsonMap().isEmpty()) line(out, facts.toString());
 		} else {
-			out.append("Midlets:").append('\n');
-			for (MidletEntry midlet : result.midlets) {
-				out.append("  ")
-					.append(midlet.index)
-					.append(". ")
-					.append(midlet.name)
-					.append(" -> ")
-					.append(midlet.className)
-					.append('\n');
+			Json result = envelope.at("result", Json.object());
+			permission(out, result.at("permission", Json.nil()));
+			String command = text(envelope.at("command"));
+			if (result.has("usage")) line(out, text(result.at("usage")));
+			else if ("inspect".equals(command)) {
+				line(out, "App: " + text(result.at("name"))); line(out, "Path: " + text(result.at("path")));
+				line(out, "Source: " + text(result.at("sourceKind")));
+				line(out, "Vendor: " + text(result.at("vendor"))); line(out, "Version: " + text(result.at("version")));
+				for (Json midlet : result.at("midlets", Json.array()).asJsonList()) line(out, "  " + midlet.at("index") + ". " + text(midlet.at("name")));
+			} else {
+				Json session = result.at("session", Json.nil());
+				if (session.isObject()) line(out, "Session " + text(session.at("id")) + ": " + text(session.at("status", "")));
+				Json app = result.at("app", Json.nil());
+				if (app.isObject()) line(out, "App: " + text(app.at("name", "")) + " (" + text(app.at("status", "none")) + ")");
+				if (result.has("failure")) line(out, "Worker failure: " + result.at("failure"));
+				if (result.has("reason")) line(out, "Reason: " + text(result.at("reason")));
+				if (result.has("action")) line(out, ("pending".equals(text(envelope.at("outcome"))) ? "Pending: " : "Applied: ") + result.at("action"));
+				if (result.has("matched")) line(out, "Matched: " + text(result.at("condition")));
+				if (result.has("exitCode")) line(out, "Exit code: " + text(result.at("exitCode")));
+				if (result.has("elapsedMs")) line(out, "Elapsed: " + text(result.at("elapsedMs")) + " ms");
+				if (result.has("text")) line(out, text(result.at("text")));
+				for (Json log : result.at("lines", Json.array()).asJsonList()) line(out, text(log.at("line", log.at("text", ""))));
+				if (result.has("cursor")) line(out, "Cursor: " + text(result.at("cursor")));
+				if (result.has("archive")) line(out, text(result.at("action", "Storage")) + ": " + text(result.at("archive")));
+				view(out, result.at("observation", Json.nil()));
 			}
-
-			if (result.selectedMidletClass != null) {
-				out.append("Selected MIDlet class: ")
-					.append(result.selectedMidletClass)
-					.append('\n');
-			}
 		}
-
-		return trimTrailingNewline(out);
-	}
-
-	public static String renderOpen(Json payload) {
-		StringBuilder out = new StringBuilder();
-		Json app = payload.at("app");
-		if (app != null && app.isObject()) {
-			out.append("Opened: ")
-				.append(
-					app.at("displayName", Json.nil()).isNull()
-						? "(unknown)"
-						: app.at("displayName").asString())
-				.append('\n');
-		}
-
-		if (payload.has("status") && !payload.at("status").isNull()) {
-			out.append("Status: ").append(payload.at("status").asString()).append('\n');
-		}
-
-		Json state = payload.at("state", Json.nil());
-		out.append("Ready: ")
-			.append(!state.isNull() && state.at("ready", false).asBoolean())
-			.append('\n');
-		Json displayable = state.isNull() ? Json.nil() : state.at("displayable", Json.nil());
-		out.append("Title: ")
-			.append(
-				displayable.isNull() || displayable.at("title", Json.nil()).isNull()
-					? ""
-					: displayable.at("title").asString())
-			.append('\n');
-
-		return trimTrailingNewline(out);
-	}
-
-	public static String renderState(Json wrapper) {
-		if (!wrapper.at("active", false).asBoolean()) {
-			return "No active app.";
-		}
-
-		Json payload = wrapper.at("state", Json.object());
-		StringBuilder out = new StringBuilder();
-		Json app = wrapper.at("app");
-		if (app != null && app.isObject()) {
-			out.append("App: ")
-				.append(
-					app.at("displayName", Json.nil()).isNull()
-						? "(unknown)"
-						: app.at("displayName").asString())
-				.append('\n');
-		}
-
-		out.append("Ready: ").append(payload.at("ready", false).asBoolean()).append('\n');
-		out.append("Midlet started: ")
-			.append(payload.at("midletStarted", false).asBoolean())
-			.append('\n');
-		Json displayable = payload.at("displayable");
-		if (displayable != null && !displayable.isNull()
-			&& displayable.has("title") && !displayable.at("title").isNull()) {
-			out.append("Title: ").append(displayable.at("title").asString()).append('\n');
-		}
-		if (displayable != null && !displayable.isNull()
-			&& displayable.has("kind") && !displayable.at("kind").isNull()) {
-			out.append("Displayable: ")
-				.append(displayable.at("kind").asString())
-				.append('\n');
-		}
-
-		if (payload.has("permissionRequest") && !payload.at("permissionRequest").isNull()) {
-			Json permission = payload.at("permissionRequest");
-			out.append("Permission pending: id=").append(permission.at("id").asInteger());
-			if (permission.has("message") && !permission.at("message").isNull()) {
-				out.append(" message=").append(permission.at("message").asString());
-			}
-
-			out.append('\n');
-		}
-
-		return trimTrailingNewline(out);
-	}
-
-	public static String renderObserve(Json wrapper) {
-		if (wrapper.has("active") && !wrapper.at("active", false).asBoolean()) {
-			return "No active app.";
-		}
-
-		Json payload = wrapper.at("state", Json.object());
-		StringBuilder out = new StringBuilder();
-		out.append("Ready: ").append(payload.at("ready", false).asBoolean()).append('\n');
-		out.append("Midlet started: ")
-			.append(payload.at("midletStarted", false).asBoolean())
-			.append('\n');
-			Json displayable = payload.at("displayable", Json.nil());
-			if (!displayable.isNull() && displayable.has("kind") && !displayable.at("kind").isNull()) {
-				out.append("Displayable: ")
-					.append(displayable.at("kind").asString())
-					.append('\n');
-			}
-
-			if (!displayable.isNull() && displayable.has("title") && !displayable.at("title").isNull()) {
-				out.append("Title: ").append(displayable.at("title").asString()).append('\n');
-			}
-
-			Json commands = displayable.isNull()
-				? Json.array()
-				: displayable.at("commands", Json.array());
-			out.append("Commands: ").append(commands.asJsonList().size()).append('\n');
-
-		for (Json command : commands.asJsonList()) {
-			out.append("  [").append(command.at("id").asInteger()).append("] ");
-			String text = command.at("text", Json.nil()).isNull()
-				? ""
-				: command.at("text").asString();
-			if (text.length() == 0
-				&& command.has("label")
-				&& !command.at("label").isNull()) {
-				text = command.at("label").asString();
-			}
-
-			if (text.length() == 0) {
-				text = "(unnamed command)";
-			}
-
-			out.append(text).append('\n');
-		}
-
-		if (payload.has("permissionRequest") && !payload.at("permissionRequest").isNull()) {
-			Json permission = payload.at("permissionRequest");
-			out.append("Permission pending: id=").append(permission.at("id").asInteger());
-			if (permission.has("message") && !permission.at("message").isNull()) {
-				out.append(" message=").append(permission.at("message").asString());
-			}
-
-			out.append('\n');
-		}
-
-		return trimTrailingNewline(out);
-	}
-
-	public static String renderCommandRun(Json payload) {
-		String text = payload.at("text", "").asString();
-		if (text != null && text.length() > 0) {
-			return "Command invoked: " + text;
-		}
-
-		return "Command invoked.";
-	}
-
-	public static String renderPermission(Json payload) {
-		return payload.at("allow", false).asBoolean() ? "Permission allowed." : "Permission denied.";
+		if (envelope.has("diagnostics")) line(out, "Diagnostics: " + envelope.at("diagnostics"));
+		if (out.length() > 0) out.setLength(out.length() - 1);
+		return out.toString();
 	}
 }

@@ -1,6 +1,7 @@
 package emulator.cli.controller;
 
 import emulator.automation.shared.AutomationErrorCodes;
+import emulator.automation.shared.OperationDeadline;
 import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.KemuCliException;
 import emulator.cli.support.CliDefaults;
@@ -35,22 +36,11 @@ final class ControllerProcessLauncher {
 				json);
 		}
 
-		if (options.width != null && options.height != null && status.screen != null) {
-			String expected = options.width + "x" + options.height;
-			if (!expected.equals(status.screen)) {
-				throw new KemuCliException(
-					CliErrorCodes.CONFLICTING_CONTROLLER_DEFAULTS,
-					"Controller screen is " + status.screen + ", not " + expected + '.',
-					commandName,
-					json);
-			}
-		}
 	}
 
-	private static void waitForControllerReady(
-		Process process, int port, Path logFile, String commandName, boolean json) throws Exception {
-		long deadline = System.nanoTime()
-			+ TimeUnit.MILLISECONDS.toNanos(CliDefaults.START_TIMEOUT_MS);
+	private static ControllerStatus waitForControllerReady(
+		Process process, int port, Path logFile, String commandName, boolean json, OperationDeadline deadline)
+		throws Exception {
 		WatchService watchService = KemuPaths.automationRunDir().getFileSystem().newWatchService();
 		KemuPaths.automationRunDir().register(
 			watchService,
@@ -68,21 +58,19 @@ final class ControllerProcessLauncher {
 				}
 
 				try {
-					ControllerStatus status = ControllerStatusService.readControllerStatus();
+					ControllerStatus status = ControllerStatusService.readControllerStatus(deadline);
 					if (status.running && status.port != null && status.port.intValue() == port) {
-						return;
+						return status;
 					}
 				} catch (Exception ignored) {
 				}
 
-				long remaining = deadline - System.nanoTime();
+				long remaining = deadline.remainingMillis();
 				if (remaining <= 0L) {
 					break;
 				}
-				WatchKey key = watchService.poll(remaining, TimeUnit.NANOSECONDS);
-				if (key == null) {
-					break;
-				}
+				WatchKey key = watchService.poll(Math.min(100L, remaining), TimeUnit.MILLISECONDS);
+				if (key == null) continue;
 				key.pollEvents();
 				if (!key.reset()) {
 					break;
@@ -99,7 +87,8 @@ final class ControllerProcessLauncher {
 			json);
 	}
 
-	private static ControllerStatus startController(StartOptions options, String commandName, boolean json)
+	private static ControllerStatus startController(
+		StartOptions options, String commandName, boolean json, OperationDeadline deadline)
 		throws Exception {
 		ControllerStatusService.deleteStateFiles();
 		Files.createDirectories(KemuPaths.automationRunDir());
@@ -111,6 +100,10 @@ final class ControllerProcessLauncher {
 		Files.deleteIfExists(logFile);
 
 		String actualMode = ControllerRuntimeResolver.resolveControllerMode(options, commandName, json);
+		if (deadline.timedOut()) {
+			throw new KemuCliException(AutomationErrorCodes.TIMEOUT,
+				"Operation budget expired before starting the controller.", commandName, json);
+		}
 		int actualWidth = options.width == null ? CliDefaults.DEFAULT_WIDTH : options.width.intValue();
 		int actualHeight = options.height == null ? CliDefaults.DEFAULT_HEIGHT : options.height.intValue();
 		int port = ControllerRuntimeResolver.findFreePort();
@@ -154,19 +147,19 @@ final class ControllerProcessLauncher {
 		builder.redirectOutput(logFile.toFile());
 		builder.environment().put("SWT_GTK4", "0");
 		Process process = builder.start();
-		waitForControllerReady(process, port, logFile, commandName, json);
-		ControllerStatus status = ControllerStatusService.readControllerStatus();
-		if (!status.running) {
-			throw new KemuCliException(
-				CliErrorCodes.START_FAILED, "Controller did not become ready.", commandName, json);
-		}
-
-		return status;
+		return waitForControllerReady(process, port, logFile, commandName, json, deadline);
 	}
 
 	static ControllerStatus ensureController(StartOptions options, boolean autoStart, String commandName, boolean json)
 		throws Exception {
-		ControllerStatus status = ControllerStatusService.readControllerStatus();
+		return ensureController(options, autoStart, commandName, json,
+			OperationDeadline.afterMillis(CliDefaults.START_TIMEOUT_MS));
+	}
+
+	static ControllerStatus ensureController(
+		StartOptions options, boolean autoStart, String commandName, boolean json, OperationDeadline deadline)
+		throws Exception {
+		ControllerStatus status = ControllerStatusService.readControllerStatus(deadline);
 		if (status.running) {
 			validateControllerCompatibility(status, options, commandName, json);
 
@@ -174,28 +167,16 @@ final class ControllerProcessLauncher {
 		}
 
 		if (status.degraded) {
-			ControllerStatusService.cleanupUnreachableController(status, commandName, json);
-			status = ControllerStatusService.readControllerStatus();
-			if (status.running) {
-				validateControllerCompatibility(status, options, commandName, json);
-
-				return status;
-			}
+			throw new KemuCliException(AutomationErrorCodes.CONTROLLER_UNREACHABLE,
+				"Controller process exists but is unreachable. Use 'kemu stop' to terminate this session.",
+				commandName, json);
 		}
 
 		if (!autoStart) {
-			if (status.degraded) {
-				throw new KemuCliException(
-					AutomationErrorCodes.CONTROLLER_UNREACHABLE,
-					"Controller process exists but is unreachable.",
-					commandName,
-					json);
-			}
-
 			throw new KemuCliException(
 				CliErrorCodes.CONTROLLER_NOT_RUNNING, "Controller is not running.", commandName, json);
 		}
 
-		return startController(options, commandName, json);
+		return startController(options, commandName, json, deadline);
 	}
 }

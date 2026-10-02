@@ -60,6 +60,7 @@ public class Display {
 		Emulator.getEmulator().getScreen().getCaret().displayableChanged();
 		if (d != null) {
 			Display.current = d;
+			AutomationWorkerRuntime.onDisplayChanging(d);
 			if (d instanceof Canvas) {
 				if (AppSettings.blackberryApi) {
 					((Canvas) d).setFullScreenMode(true);
@@ -168,6 +169,7 @@ public class Display {
 			Display.current._defocus();
 		}
 		Display.current = alert;
+		AutomationWorkerRuntime.onDisplayChanging(alert);
 		alert.lastDisplayed = ret;
 		Emulator.setScreen(alert);
 		alert._shown();

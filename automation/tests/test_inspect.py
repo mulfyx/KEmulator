@@ -5,13 +5,13 @@ import pytest
 
 def test_inspect_jar(kemu, fixtures):
     result = kemu.ok("inspect", fixtures["COMMAND_FIXTURE_JAR"], command="inspect")
-    assert result["displayName"] == "Command Fixture"
+    assert result["name"] == "Command Fixture"
     assert result["sourceKind"] == "jar"
 
 
 def test_inspect_dash_prefixed_paths(kemu, fixtures):
     result = kemu.ok("inspect", fixtures["DASH_PREFIXED_JAR"])
-    assert result["displayName"] == "Command Fixture"
+    assert result["name"] == "Command Fixture"
 
 
 @pytest.mark.parametrize(
@@ -28,7 +28,7 @@ def test_inspect_dash_prefixed_paths(kemu, fixtures):
 )
 def test_inspect_descriptor_variants(kemu, fixtures, env_key, display_name, midlets):
     result = kemu.ok("inspect", fixtures[env_key])
-    assert result["displayName"] == display_name
+    assert result["name"] == display_name
     assert len(result["midlets"]) == midlets
 
 
@@ -60,13 +60,15 @@ def test_inspect_missing_path(kemu, workdir):
     ],
 )
 def test_suite_property_merge(kemu, fixtures, env_key, expected_title):
-    result = kemu.ok("inspect", fixtures[env_key])
-    assert result["suiteProperties"]["Fixture-Menu-Title"] == expected_title
+    response = kemu.run("--verbose", "inspect", fixtures[env_key])
+    assert response.ok, response.raw
+    assert response.diagnostics["suiteProperties"]["Fixture-Menu-Title"] == expected_title
 
 
 def test_manifest_only_keys_survive_jad_midlet_list(kemu, fixtures):
-    result = kemu.ok("inspect", fixtures["PROPS_JAD_ONLY_JAD"])
-    props = result["suiteProperties"]
+    response = kemu.run("--verbose", "inspect", fixtures["PROPS_JAD_ONLY_JAD"])
+    assert response.ok, response.raw
+    props = response.diagnostics["suiteProperties"]
     assert props["MicroEdition-Profile"] == "MIDP-2.0"
     assert props["MIDlet-Vendor"] == "KEmulator"
     result = kemu.ok("inspect", fixtures["PROPS_MULTI_MIDLET_JAD"])

@@ -10,7 +10,9 @@ public final class InspectCommand implements CliCommand {
 	}
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
-		if (invocation.tokens().size() != 2) {
+		int pathIndex = invocation.tokens().size() > 1 && "--".equals(invocation.tokens().get(1)) ? 2 : 1;
+		if (invocation.tokens().size() != pathIndex + 1
+			|| pathIndex == 1 && invocation.tokens().get(pathIndex).startsWith("--")) {
 			throw new KemuCliException(
 				CliErrorCodes.USAGE_ERROR,
 				CliTextRenderer.usageText("inspect"),
@@ -19,10 +21,10 @@ public final class InspectCommand implements CliCommand {
 		}
 
 		java.nio.file.Path input = emulator.cli.parse.CliParsing.resolveUserPath(
-			invocation.tokens().get(1));
+			invocation.tokens().get(pathIndex));
 		InspectionResult result = CliAppInspector.inspect(input, "inspect", invocation.json());
 
 		return new CommandResult(
-			"inspect", CliTextRenderer.renderInspection(result), result.toJson(), invocation.json());
+			"inspect", result.toJson(), invocation.json());
 	}
 }

@@ -2,6 +2,7 @@ package emulator.automation.controller;
 
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
+import emulator.automation.shared.OperationDeadline;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -9,7 +10,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import mjson.Json;
 
 final class ControllerOperationRegistry {
-	private static final long QUEUE_WAIT_MS = 30000L;
 
 	interface ShutdownHandler {
 		void requestShutdown();
@@ -61,20 +61,21 @@ final class ControllerOperationRegistry {
 	}
 
 	Json dispatch(String op, Json request) throws Exception {
+		OperationDeadline deadline = OperationDeadline.fromRequest(request, 10000L);
 		ControllerOperation command = commands.get(op);
 		if (command == null) {
 			throw new AutomationException(AutomationErrorCodes.INVALID_REQUEST, "Unknown controller operation: " + op);
 		}
 
 		if (command.dispatchMode() == DispatchMode.PRIORITY) {
-			return command.execute(request);
+			return command.execute(deadline.withRemaining(request));
 		}
 
 		// Bounded queueing: a wedged queued operation must produce a
 		// structured error instead of an opaque socket timeout.
 		boolean acquired;
 		try {
-			acquired = requestQueueLock.tryLock(QUEUE_WAIT_MS, TimeUnit.MILLISECONDS);
+			acquired = requestQueueLock.tryLock(deadline.remainingMillis(), TimeUnit.MILLISECONDS);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			throw new AutomationException(
@@ -84,10 +85,11 @@ final class ControllerOperationRegistry {
 			throw new AutomationException(
 				AutomationErrorCodes.TIMEOUT,
 				"Controller request queue is busy",
-				Json.object().set("operation", op).set("queueWaitMs", QUEUE_WAIT_MS));
+				Json.object().set("operation", op).set("queueWaitMs", deadline.elapsedMillis())
+					.set("admitted", false).set("effectUnknown", false));
 		}
 		try {
-			return command.execute(request);
+			return command.execute(deadline.withRemaining(request));
 		} finally {
 			requestQueueLock.unlock();
 		}
@@ -131,7 +133,7 @@ final class ControllerOperationRegistry {
 		});
 		registerCommand("app.session", DispatchMode.QUEUED, new ControllerAction() {
 			public Json run(Json request) throws Exception {
-				return workerSession.sessionInfo();
+				return workerSession.sessionInfo(request);
 			}
 		});
 		registerCommand("app.observe", DispatchMode.QUEUED, new ControllerAction() {
@@ -161,6 +163,15 @@ final class ControllerOperationRegistry {
 			}
 		});
 		registerWorkerProxy("app.key");
+		registerCommand("app.agent.observe", DispatchMode.PRIORITY, new ControllerAction() {
+			public Json run(Json request) throws Exception { return workerSession.proxyWorker("agent-observe", request); }
+		});
+		registerCommand("app.agent.wait.frame", DispatchMode.PRIORITY, new ControllerAction() {
+			public Json run(Json request) throws Exception { return workerSession.proxyWorker("agent-wait-frame", request); }
+		});
+		registerWorkerProxy("app.ref.activate");
+		registerWorkerProxy("app.ref.select");
+		registerWorkerProxy("app.ref.set");
 		registerWorkerProxy("app.key.down");
 		registerWorkerProxy("app.key.up");
 		registerWorkerProxy("app.pointer.tap");

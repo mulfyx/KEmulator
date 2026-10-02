@@ -13,10 +13,17 @@ final class WorkerOperationDispatcher {
 	private WorkerOperationDispatcher() {
 	}
 
+	private static Json inputResult(Json delivery) {
+		Json result = Json.object().set("delivery", delivery);
+		for (String key : new String[]{"state", "pending", "status", "permissionRequest"})
+			if (delivery.has(key)) result.set(key, delivery.at(key).dup());
+		return result;
+	}
+
 	static Json dispatch(String op, Json request, ShutdownRequester shutdownRequester) {
 		if (request.has("timeoutMs") && !request.at("timeoutMs").isNull()) {
 			long timeoutMs = request.at("timeoutMs").asLong();
-			if (timeoutMs < 0L || timeoutMs > AutomationLimits.MAX_WAIT_MS) {
+			if (timeoutMs < 0L || timeoutMs > AutomationLimits.MAX_OPEN_TIMEOUT_MS) {
 				throw new AutomationException(
 					AutomationErrorCodes.INVALID_REQUEST,
 					"timeoutMs must be between 0 and " + AutomationLimits.MAX_WAIT_MS);
@@ -24,8 +31,13 @@ final class WorkerOperationDispatcher {
 		}
 
 		if ("health".equals(op) || "session".equals(op)) {
-			return WorkerSessionSnapshot.build(false);
+			return WorkerSessionSnapshot.build(false, request.at("timeoutMs", 5000L).asLong());
 		}
+		if ("agent-observe".equals(op)) return WorkerAgentObservation.observe(request);
+		if ("agent-wait-frame".equals(op)) return WorkerAgentObservation.waitFrame(request);
+		if ("ref-activate".equals(op)) return WorkerTargetActions.activate(request);
+		if ("ref-select".equals(op)) return WorkerTargetActions.select(request);
+		if ("ref-set".equals(op)) return WorkerTargetActions.set(request);
 
 		if ("observe".equals(op)) {
 			return WorkerSessionSnapshot.build(request.at("includeImage", false).asBoolean());
@@ -49,10 +61,10 @@ final class WorkerOperationDispatcher {
 				code,
 				durationMs,
 				request.at("waitDispatched", false).asBoolean(),
-				request.at("waitRelease", false).asBoolean());
+				request.at("waitRelease", false).asBoolean(), request);
 			WorkerCommands.invalidate();
 
-			return Json.object()
+			return inputResult(delivery)
 				.set("key", key)
 				.set("code", code)
 				.set("delivery", delivery)
@@ -66,11 +78,11 @@ final class WorkerOperationDispatcher {
 			int code = WorkerInputActions.resolveKeyCode(key, request.at("code"));
 			boolean waitDispatched = request.at("waitDispatched", false).asBoolean();
 			Json delivery = "key-down".equals(op)
-				? WorkerInputActions.keyDown(code, waitDispatched)
-				: WorkerInputActions.keyUp(code, waitDispatched);
+				? WorkerInputActions.keyDown(code, waitDispatched, request)
+				: WorkerInputActions.keyUp(code, waitDispatched, request);
 			WorkerCommands.invalidate();
 
-			return Json.object()
+			return inputResult(delivery)
 				.set("key", key)
 				.set("code", code)
 				.set("delivery", delivery)
@@ -88,11 +100,11 @@ final class WorkerOperationDispatcher {
 
 			boolean waitDispatched = request.at("waitDispatched", false).asBoolean();
 			Json delivery = "pointer-down".equals(op)
-				? WorkerInputActions.pointerDown(x, y, waitDispatched)
-				: WorkerInputActions.pointerUp(x, y, waitDispatched);
+				? WorkerInputActions.pointerDown(x, y, waitDispatched, request)
+				: WorkerInputActions.pointerUp(x, y, waitDispatched, request);
 			WorkerCommands.invalidate();
 
-			return Json.object()
+			return inputResult(delivery)
 				.set("x", x)
 				.set("y", y)
 				.set("delivery", delivery)
@@ -111,10 +123,10 @@ final class WorkerOperationDispatcher {
 			Json delivery = WorkerInputActions.tap(
 				x,
 				y,
-				request.at("waitDispatched", false).asBoolean());
+				request.at("waitDispatched", false).asBoolean(), request);
 			WorkerCommands.invalidate();
 
-			return Json.object()
+			return inputResult(delivery)
 				.set("x", x)
 				.set("y", y)
 				.set("delivery", delivery)
@@ -141,10 +153,10 @@ final class WorkerOperationDispatcher {
 			Json delivery = WorkerInputActions.drag(
 				points,
 				delayMs,
-				request.at("waitDispatched", false).asBoolean());
+				request.at("waitDispatched", false).asBoolean(), request);
 			WorkerCommands.invalidate();
 
-			return Json.object()
+			return inputResult(delivery)
 				.set("points", points.asJsonList().size())
 				.set("delivery", delivery)
 				.set("elapsedMs", java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
@@ -208,7 +220,7 @@ final class WorkerOperationDispatcher {
 		}
 
 		if ("permission".equals(op)) {
-			int id = request.at("id", -1).asInteger();
+			int id = request.has("ref") ? WorkerTargets.permissionId(request.at("ref").asString()) : request.at("id", -1).asInteger();
 			boolean allow = request.at("allow", false).asBoolean();
 			String mode = request.at("mode", "once").asString();
 

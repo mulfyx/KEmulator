@@ -28,46 +28,8 @@ final class OpenOptionParsers {
 		}
 	}
 
-	private static boolean isOpenOptionToken(String token) {
-		return "--midlet".equals(token)
-			|| "--headless".equals(token)
-			|| "--visible".equals(token)
-			|| "--runtime".equals(token)
-			|| "--size".equals(token)
-			|| "--data-dir".equals(token)
-			|| "--rms-dir".equals(token)
-			|| "--file-root".equals(token)
-			|| "--reset-state".equals(token)
-			|| "--reset-file-root".equals(token)
-			|| "--wait-ready".equals(token)
-			|| "--open-timeout".equals(token)
-			|| "--worker-xmx".equals(token);
-	}
-
-	private static int parseInputPathIndex(List<String> tokens, boolean json) {
-		if (tokens.size() < 2) {
-			throw usageError(json);
-		}
-
-		String token = tokens.get(1);
-		if ("--".equals(token)) {
-			if (tokens.size() < 3) {
-				throw usageError(json);
-			}
-
-			return 2;
-		}
-
-		if (isOpenOptionToken(token)) {
-			throw usageError(json);
-		}
-
-		return 1;
-	}
-
 	static OpenOptions parse(List<String> tokens, boolean json) {
-		int inputPathIndex = parseInputPathIndex(tokens, json);
-		Path inputPath = CliParsing.resolveUserPath(tokens.get(inputPathIndex));
+		Path inputPath = null;
 		Integer midlet = null;
 		Path dataDir = null;
 		Path rmsDir = null;
@@ -75,12 +37,16 @@ final class OpenOptionParsers {
 		String workerXmx = null;
 		boolean resetState = false;
 		boolean resetFileRoot = false;
-		boolean waitReady = false;
-		Integer openTimeoutMs = null;
 		ArrayList<String> startTokens = new ArrayList<String>();
-		for (int i = inputPathIndex + 1; i < tokens.size(); i++) {
+		for (int i = 1; i < tokens.size(); i++) {
 			String token = tokens.get(i);
-			if ("--midlet".equals(token)) {
+			if ("--".equals(token)) {
+				if (inputPath != null || i + 2 != tokens.size()) throw usageError(json);
+				inputPath = CliParsing.resolveUserPath(tokens.get(++i));
+			} else if (!token.startsWith("--")) {
+				if (inputPath != null) throw usageError(json);
+				inputPath = CliParsing.resolveUserPath(token);
+			} else if ("--midlet".equals(token)) {
 				if (i + 1 >= tokens.size()) {
 					throw usageError(json);
 				}
@@ -93,7 +59,15 @@ final class OpenOptionParsers {
 				if (i + 1 >= tokens.size()) {
 					throw usageError(json);
 				}
-				Path value = CliParsing.resolveUserPath(tokens.get(++i));
+				int valueIndex = i + 1;
+				if ("--".equals(tokens.get(valueIndex))) {
+					valueIndex++;
+					if (valueIndex != tokens.size() - 1) throw usageError(json);
+				} else if (tokens.get(valueIndex).startsWith("--")) {
+					throw usageError(json);
+				}
+				Path value = CliParsing.resolveUserPath(tokens.get(valueIndex));
+				i = valueIndex;
 				if ("--data-dir".equals(token)) {
 					requireSingleAssignment(dataDir, token, json);
 					dataDir = value;
@@ -110,6 +84,10 @@ final class OpenOptionParsers {
 				}
 				requireSingleAssignment(workerXmx, token, json);
 				workerXmx = tokens.get(++i);
+				if (!workerXmx.matches("[1-9][0-9]*[kKmMgG]")) {
+					throw new KemuCliException(CliErrorCodes.USAGE_ERROR,
+						"Invalid worker heap size: " + workerXmx, "open", json);
+				}
 			} else if ("--reset-state".equals(token)) {
 				if (resetState) {
 					throw duplicateOption(token, json);
@@ -120,26 +98,9 @@ final class OpenOptionParsers {
 					throw duplicateOption(token, json);
 				}
 				resetFileRoot = true;
-			} else if ("--wait-ready".equals(token)) {
-				if (waitReady) {
-					throw duplicateOption(token, json);
-				}
-				waitReady = true;
-			} else if ("--open-timeout".equals(token)) {
-				if (i + 1 >= tokens.size()) {
-					throw usageError(json);
-				}
-				requireSingleAssignment(openTimeoutMs, token, json);
-				openTimeoutMs = Integer.valueOf(CliParsing.requireInclusiveRange(
-					CliParsing.parseIntegerArgument(tokens.get(++i), "--open-timeout", "open", json),
-					emulator.automation.shared.AutomationLimits.MIN_OPEN_TIMEOUT_MS,
-					emulator.automation.shared.AutomationLimits.MAX_OPEN_TIMEOUT_MS,
-					"--open-timeout",
-					"open",
-					json));
 			} else if ("--headless".equals(token) || "--visible".equals(token)) {
 				startTokens.add(token);
-			} else if ("--runtime".equals(token) || "--size".equals(token)) {
+			} else if ("--size".equals(token)) {
 				if (i + 1 >= tokens.size()) {
 					throw usageError(json);
 				}
@@ -150,6 +111,7 @@ final class OpenOptionParsers {
 			}
 		}
 
+		if (inputPath == null) throw usageError(json);
 		if (resetFileRoot && !resetState) {
 			throw new KemuCliException(
 				CliErrorCodes.USAGE_ERROR,
@@ -175,8 +137,8 @@ final class OpenOptionParsers {
 			fileRoot,
 			resetState,
 			resetFileRoot,
-			waitReady,
-			openTimeoutMs,
+			true,
+			null,
 			workerXmx);
 	}
 }

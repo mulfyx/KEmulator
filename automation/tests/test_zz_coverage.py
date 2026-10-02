@@ -28,7 +28,7 @@ def test_every_registered_command_has_a_passing_test(known_commands):
 
 def test_usage_text_covers_the_registry(kemu, known_commands):
     """Every registered command must be reachable from the root usage text
-    (usage granularity may be coarser, e.g. `list <select|move ...>`)."""
+    (usage granularity may be coarser, e.g. `key <press|hold|down|up>`)."""
     usage_commands = parse_usage_commands(kemu.ok("help")["usage"])
     uncovered = sorted(
         command for command in known_commands

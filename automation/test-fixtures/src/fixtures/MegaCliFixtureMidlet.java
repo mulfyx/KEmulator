@@ -55,6 +55,7 @@ public final class MegaCliFixtureMidlet extends MIDlet implements CommandListene
 			menu.setCommandListener(this);
 		}
 
+		System.out.println("MEGA fixture started");
 		Display.getDisplay(this).setCurrent(menu);
 	}
 

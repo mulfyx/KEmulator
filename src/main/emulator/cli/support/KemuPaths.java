@@ -39,11 +39,6 @@ public final class KemuPaths {
 		if (configured != null) {
 			return Paths.get(configured).toAbsolutePath().normalize();
 		}
-		Path legacy = rootDir().resolve("automation");
-		if ((Files.isDirectory(legacy) && Files.isWritable(legacy))
-			|| (!Files.exists(legacy) && Files.isWritable(rootDir()))) {
-			return legacy;
-		}
 		String rootKey = Integer.toHexString(rootDir().toString().hashCode());
 		return Paths.get(System.getProperty("java.io.tmpdir"))
 			.resolve("kemu-automation-" + rootKey)

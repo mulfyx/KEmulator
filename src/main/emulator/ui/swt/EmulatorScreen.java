@@ -232,15 +232,14 @@ public final class EmulatorScreen implements
 				this.screenImageSwt = new ImageSWT(w, h, false, bgcolor);
 				this.backBufferImageSwt = new ImageSWT(w, h, false, bgcolor);
 				this.xrayScreenImageSwt = new ImageSWT(w, h, true, bgcolor);
-				return;
-			}
-			if (Settings.g2d == 1) {
+			} else if (Settings.g2d == 1) {
 				this.screenCopyAwt = new ImageAWT(w, h, false, bgcolor);
 				this.screenImageAwt = new ImageAWT(w, h, false, bgcolor);
 				this.backBufferImageAwt = new ImageAWT(w, h, false, bgcolor);
 				this.xrayScreenImageAwt = new ImageAWT(w, h, true, -16777216);
 			}
 		}
+		emulator.automation.worker.WorkerFrameCapture.geometryChanged();
 	}
 
 	public void setWindowIcon(final InputStream inputStream) {

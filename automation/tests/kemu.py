@@ -25,9 +25,9 @@ _USAGE_LINE = re.compile(r"^\s*kemu\s+(.*)$")
 _WORD = re.compile(r"^[a-z][a-z0-9-]*$")
 _ALTERNATION = re.compile(r"^<([a-z0-9|-]+)>$")
 
-ENVELOPE_KEYS = {"ok", "command", "result"}
-ERROR_ENVELOPE_KEYS = {"ok", "command", "error"}
-FORBIDDEN_RESULT_KEYS = {"ok", "error", "command"}
+ENVELOPE_KEYS = {"outcome", "command", "result"}
+ERROR_ENVELOPE_KEYS = {"outcome", "command", "error"}
+FORBIDDEN_RESULT_KEYS = {"outcome", "error", "command", "ok"}
 
 
 def parse_usage_commands(usage_text: str) -> set[str]:
@@ -76,7 +76,7 @@ class _Bridge:
             mode="w+", prefix=f"kemu-bridge-{session_id}-", suffix=".log",
             delete=False)
         self.proc = subprocess.Popen(
-            ["./kemu.sh", "--session-id", session_id, "--json", "bridge"],
+            ["./kemu.sh", "--session", session_id, "--json", "bridge"],
             cwd=release_dir,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -152,12 +152,17 @@ class _Bridge:
 
 @dataclass
 class KemuResult:
-    ok: bool
+    outcome: str
+    diagnostics: dict
     command: str | None
     result: dict
     error: dict
     exit_code: int | None
     raw: str
+
+    @property
+    def ok(self) -> bool:
+        return self.outcome == "done"
 
     @property
     def code(self) -> str | None:
@@ -172,7 +177,7 @@ class KemuResult:
 
 
 class KemuCli:
-    """One CLI facade bound to a release bundle and a --session-id."""
+    """One CLI facade bound to a release bundle and a --session."""
 
     def __init__(self, release_dir: Path, session_id: str,
                  known_commands: set[str] | None = None):
@@ -196,7 +201,7 @@ class KemuCli:
                 timeout: int = 240) -> subprocess.CompletedProcess:
         # Global flags go before the command tokens so a literal `--` in the
         # command arguments cannot swallow them.
-        argv = ["./kemu.sh", "--session-id", self.session_id]
+        argv = ["./kemu.sh", "--session", self.session_id]
         if json_mode:
             argv.append("--json")
         argv.extend(args)
@@ -210,40 +215,34 @@ class KemuCli:
 
     def _assert_envelope(self, args: tuple[str, ...], envelope: dict,
                          exit_code: int | None) -> None:
-        if envelope.get("ok"):
-            if set(envelope) != ENVELOPE_KEYS:
-                raise KemuError(
-                    f"kemu {' '.join(args)}: success envelope keys "
-                    f"{sorted(envelope)}, expected {sorted(ENVELOPE_KEYS)}")
-            result = envelope.get("result")
-            if not isinstance(result, dict):
-                raise KemuError(
-                    f"kemu {' '.join(args)}: result is not an object: {result!r}")
-            leaked = FORBIDDEN_RESULT_KEYS & set(result)
-            if leaked:
-                raise KemuError(
-                    f"kemu {' '.join(args)}: envelope keys leaked into result: "
-                    f"{sorted(leaked)}")
-            if exit_code not in (None, 0):
-                raise KemuError(
-                    f"kemu {' '.join(args)}: ok envelope but exit {exit_code}")
+        outcome = envelope.get("outcome")
+        if outcome not in ("done", "pending", "error"):
+            raise KemuError(f"invalid outcome for {args!r}: {envelope!r}")
+        expected = ERROR_ENVELOPE_KEYS if outcome == "error" else ENVELOPE_KEYS
+        optional = {"diagnostics"} if "--verbose" in args else set()
+        if not expected <= set(envelope) or set(envelope) - expected - optional:
+            raise KemuError(f"invalid envelope for {args!r}: {envelope!r}")
+        if "diagnostics" in envelope and not isinstance(envelope["diagnostics"], dict):
+            raise KemuError(f"diagnostics must be an object: {envelope!r}")
+        if outcome != "error":
+            result = envelope["result"]
+            if not isinstance(result, dict) or FORBIDDEN_RESULT_KEYS & set(result):
+                raise KemuError(f"invalid public result for {args!r}: {result!r}")
+            wanted_exit = 5 if outcome == "pending" else 0
+            if exit_code not in (None, wanted_exit):
+                raise KemuError(f"{outcome} envelope with exit {exit_code}: {envelope!r}")
+            if outcome == "pending":
+                permission = result.get("permission")
+                if not isinstance(permission, dict) or not permission.get("ref"):
+                    raise KemuError(f"pending response needs an actionable permission: {result!r}")
         else:
-            if set(envelope) != ERROR_ENVELOPE_KEYS:
-                raise KemuError(
-                    f"kemu {' '.join(args)}: error envelope keys "
-                    f"{sorted(envelope)}, expected {sorted(ERROR_ENVELOPE_KEYS)}")
-            error = envelope.get("error")
-            if not isinstance(error, dict) or not error.get("code") \
-                    or not error.get("message"):
-                raise KemuError(
-                    f"kemu {' '.join(args)}: malformed error object: {error!r}")
-            if "details" in error and error["details"] is None:
-                raise KemuError(
-                    f"kemu {' '.join(args)}: error.details must be omitted or non-null")
-            if exit_code == 0:
-                raise KemuError(
-                    f"kemu {' '.join(args)}: error envelope but exit 0")
-            # exit_code is None over the bridge: nothing more to check.
+            error = envelope["error"]
+            if not isinstance(error, dict) or not error.get("code") or not error.get("message"):
+                raise KemuError(f"malformed error for {args!r}: {error!r}")
+            if error.get("details", {}) is None:
+                raise KemuError(f"null error.details for {args!r}")
+            if exit_code not in (None, 2, 3, 4):
+                raise KemuError(f"error envelope with exit {exit_code}: {envelope!r}")
 
     def run(self, *args: str, timeout: int = 240,
             oneshot: bool = False) -> KemuResult:
@@ -267,10 +266,11 @@ class KemuCli:
                 ) from failure
             exit_code = proc.returncode
         self._assert_envelope(tuple(args), envelope, exit_code)
-        if envelope.get("ok") and matched:
+        if envelope.get("outcome") in ("done", "pending") and matched:
             EXERCISED_OK_COMMANDS.add(matched)
         return KemuResult(
-            ok=bool(envelope.get("ok")),
+            outcome=envelope["outcome"],
+            diagnostics=envelope.get("diagnostics") or {},
             command=envelope.get("command"),
             result=envelope.get("result") or {},
             error=envelope.get("error") or {},
@@ -296,7 +296,7 @@ class KemuCli:
     def err(self, *args: str, code: str, timeout: int = 240,
             oneshot: bool = False) -> KemuResult:
         outcome = self.run(*args, timeout=timeout, oneshot=oneshot)
-        if outcome.ok:
+        if outcome.outcome != "error":
             raise KemuError(
                 f"kemu {' '.join(args)}: expected {code}, got success: "
                 f"{outcome.raw[:400]}"
@@ -308,23 +308,26 @@ class KemuCli:
             )
         return outcome
 
-    # -- convenience helpers -------------------------------------------------
+    def done(self, *args: str, **kwargs) -> dict:
+        return self.ok(*args, **kwargs)
+
+    def pending(self, *args: str, timeout: int = 240, oneshot: bool = False) -> dict:
+        response = self.run(*args, timeout=timeout, oneshot=oneshot)
+        if response.outcome != "pending":
+            raise KemuError(f"expected pending for {args!r}: {response.raw}")
+        return response.result
 
     def observe(self) -> dict:
         return self.ok("observe")
 
-    def state_of(self, observation: dict | None = None) -> dict:
-        return (observation or self.observe())["state"]
+    def state_of(self, result: dict | None = None) -> dict:
+        return (result if result is not None else self.observe())["observation"]
 
-    def revision(self, observation: dict | None = None) -> int:
-        return int(self.state_of(observation)["revision"])
-
-    def title(self, observation: dict | None = None) -> str | None:
-        displayable = self.state_of(observation).get("displayable") or {}
-        return displayable.get("title")
+    def title(self, result: dict | None = None) -> str | None:
+        return self.state_of(result).get("title")
 
     def open_ready(self, path: str, *extra: str) -> dict:
-        return self.ok("open", path, "--headless", "--wait-ready", *extra)
+        return self.ok("open", path, "--headless", *extra)
 
     def close(self) -> dict:
         return self.ok("close")
@@ -337,40 +340,100 @@ class KemuCli:
 
     def stop_force_quietly(self) -> None:
         try:
-            self.run("stop", "--force", timeout=60)
+            self.run("stop", timeout=60)
         except Exception:
             pass
 
-    def command_id(self, observation: dict, wanted_text: str) -> int:
-        commands = (self.state_of(observation).get("displayable") or {}) \
-            .get("commands") or []
-        for command in commands:
-            text = command.get("text") or command.get("label") or ""
-            if text == wanted_text:
-                return int(command["id"])
-        raise KemuError(f"command not found: {wanted_text!r} in {commands!r}")
+    def command_ref(self, result: dict, label: str) -> str:
+        for command in self.state_of(result).get("commands", []):
+            if command.get("label") == label:
+                assert "activate" in command["actions"], command
+                return command["ref"]
+        raise KemuError(f"command {label!r} not in {result!r}")
 
-    def run_command(self, label_text: str, *extra: str, wait_next: bool = True) -> dict:
-        observation = self.observe()
-        args = [
-            "command", "run",
-            "--id", str(self.command_id(observation, label_text)),
-            "--expect-revision", str(self.revision(observation)),
-        ]
-        if wait_next:
-            args.append("--wait-next-display")
-        args.extend(extra)
-        return self.ok(*args)
+    def node(self, result: dict, role: str | None = None, label: str | None = None) -> dict:
+        for node in walk_nodes(self.state_of(result).get("nodes", [])):
+            if (role is None or node.get("role") == role) and (label is None or node.get("label") == label):
+                return node
+        raise KemuError(f"node role={role!r} label={label!r} not in {result!r}")
+
+    def node_ref(self, result: dict, role: str | None = None, label: str | None = None) -> str:
+        return self.node(result, role, label)["ref"]
+
+    def run_command(self, label: str, *extra: str) -> dict:
+        return self.ok("activate", self.command_ref(self.observe(), label), *extra)
 
     def wait_title(self, title: str, timeout_ms: int = 10000) -> dict:
-        return self.ok(
-            "wait", "display", "--title", title, "--timeout", str(timeout_ms))
+        return self.ok("wait", "screen", "--title", title, "--timeout", str(timeout_ms))
+
+    def worker_pid(self) -> int:
+        response = self.run("--verbose", "status", oneshot=True)
+        assert response.ok, response.raw
+        return int(response.diagnostics["worker"]["pid"])
+
+
+def walk_nodes(nodes):
+    for node in nodes:
+        yield node
+        yield from walk_nodes(node.get("nodes", []))
 
 
 def png_size(path: Path) -> tuple[int, int]:
     import struct
-
     data = Path(path).read_bytes()[:24]
     assert data[:8] == b"\x89PNG\r\n\x1a\n", f"not a png: {path}"
-    width, height = struct.unpack(">II", data[16:24])
-    return width, height
+    return struct.unpack(">II", data[16:24])
+
+
+def png_pixel(path: Path, x: int, y: int) -> tuple[int, int, int]:
+    """Read an actual non-interlaced PNG pixel with only the standard library."""
+    import struct
+    import zlib
+    data = Path(path).read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    offset, compressed, palette = 8, bytearray(), None
+    while offset < len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        kind = data[offset + 4:offset + 8]
+        payload = data[offset + 8:offset + 8 + length]
+        if kind == b"IHDR":
+            width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", payload)
+        elif kind == b"IDAT":
+            compressed.extend(payload)
+        elif kind == b"PLTE":
+            palette = [tuple(payload[i:i + 3]) for i in range(0, len(payload), 3)]
+        offset += length + 12
+    assert depth == 8 and interlace == 0, (depth, interlace)
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[color]
+    stride = width * channels
+    decoded = zlib.decompress(compressed)
+    previous = bytearray(stride)
+    for row in range(y + 1):
+        start = row * (stride + 1)
+        filter_type = decoded[start]
+        pixels = bytearray(decoded[start + 1:start + 1 + stride])
+        for i in range(stride):
+            left = pixels[i - channels] if i >= channels else 0
+            above = previous[i]
+            upper_left = previous[i - channels] if i >= channels else 0
+            if filter_type == 1:
+                delta = left
+            elif filter_type == 2:
+                delta = above
+            elif filter_type == 3:
+                delta = (left + above) // 2
+            elif filter_type == 4:
+                p = left + above - upper_left
+                candidates = (left, above, upper_left)
+                delta = min(candidates, key=lambda n: abs(p - n))
+            else:
+                assert filter_type == 0, filter_type
+                delta = 0
+            pixels[i] = (pixels[i] + delta) & 255
+        previous = pixels
+    pixel = pixels[x * channels:(x + 1) * channels]
+    if color == 3:
+        return palette[pixel[0]]
+    if color in (0, 4):
+        return (pixel[0],) * 3
+    return tuple(pixel[:3])

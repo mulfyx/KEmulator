@@ -1,9 +1,9 @@
 package emulator.cli.app;
 
 import emulator.automation.shared.AutomationErrorCodes;
+import emulator.automation.shared.OperationDeadline;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
-import emulator.cli.output.CliResponses;
 import mjson.Json;
 
 public final class CloseCommand implements CliCommand {
@@ -11,43 +11,43 @@ public final class CloseCommand implements CliCommand {
 		return CommandPath.of("close");
 	}
 
-	public CommandResult run(CliInvocation invocation) throws Exception {
+	public CommandResult run(final CliInvocation invocation) throws Exception {
 		ControllerLifecycle.requireTokenCount(invocation.tokens(), 1, "close", invocation.json());
 		final boolean json = invocation.json();
+		final OperationDeadline deadline = invocation.deadline(10000L);
 
-		return ControllerLifecycle.withLifecycleLock(new java.util.concurrent.Callable<CommandResult>() {
+		return ControllerLifecycle.withLifecycleLock(deadline, "close", json, new java.util.concurrent.Callable<CommandResult>() {
 			public CommandResult call() throws Exception {
-				ControllerStatus status = ControllerStatusService.readControllerStatus();
+				ControllerStatus status = ControllerStatusService.readControllerStatus(deadline);
 				if (ControllerStatusService.isForeignPidState(status)) {
 					ControllerStatusService.deleteStateFiles();
-					Json payload = Json.object().set("closed", false).set("reason", "not_running");
+					Json payload = status.toJson().set("closed", false).set("reason", "not_running");
 
-					return new CommandResult("close", "No active app.", payload, json);
+					return new CommandResult("close", payload, json);
 				}
 
 				boolean actionable = status.running || status.degraded || Boolean.TRUE.equals(status.pidAlive);
 				if (!status.exists || !actionable) {
 					ControllerStatusService.deleteStateFiles();
-					Json payload = Json.object().set("closed", false).set("reason", "not_running");
+					Json payload = status.toJson().set("closed", false).set("reason", "not_running");
 
-					return new CommandResult("close", "No active app.", payload, json);
+					return new CommandResult("close", payload, json);
 				}
 
 				if (status.degraded || (Boolean.TRUE.equals(status.pidAlive) && !status.running)) {
 					throw new KemuCliException(
 						AutomationErrorCodes.CONTROLLER_UNREACHABLE,
-						"Controller is unreachable. Retry with kemu stop --force.",
+						"Controller is unreachable. Use kemu stop to terminate the session.",
 						"close",
 						json);
 				}
 
-				Json result = ControllerCalls.callController(
-					ControllerStatusService.controllerClient(status), "app.close", Json.object(), "close", json);
-				Json payload = CliResponses.normalizePublicJson(result);
+				ControllerClient client = ControllerStatusService.controllerClient(status);
+				Json payload = AgentCalls.call(invocation, client, deadline, "app.close", Json.object(), "close");
+				payload = AgentCalls.context(invocation, client, deadline, payload, "close");
 
 				return new CommandResult(
 					"close",
-					payload.at("closed", false).asBoolean() ? "App closed." : "No active app.",
 					payload,
 					json);
 			}

@@ -5,6 +5,34 @@ fork's automation layer has no separate release process, so sections are
 dated. Changes that break existing automation scripts are marked
 **BREAKING**.
 
+## 2026-10-03
+
+- **BREAKING** Replaced the public CLI with the agent workflow documented in
+  `CliAutomation.md`: `open` starts the selected session, `observe` exposes
+  native nodes and commands, and `activate REF`, `select REF`, `set REF VALUE`
+  act on live targets. Global session selection is `--session` or `KEMU_SESSION`;
+  an explicit bridge session takes precedence over the environment.
+- **BREAKING** Responses use `command`, `outcome: done|pending|error`, and
+  `result` or `error`. A pending permission exits 5 and supplies an actionable
+  permission ref. Text and JSON render the same public facts; JVM, PID,
+  classpath and internal paths are verbose diagnostics.
+- Refs follow target identity across value/selection changes and become stale
+  after removal, collection structural changes, owner changes or worker
+  replacement. Native actions return an action receipt and current observation.
+  Dates accept ISO values appropriate to their mode or epoch milliseconds.
+- Physical input acknowledges delivery. Composite strokes schedule their paired
+  release before waiting, so permission, timeout or interruption cannot leave
+  an accidental hold. Admitted action timeouts report unknown effect; callers
+  observe before retrying. Startup timeout retains the launched worker.
+- Canvas captures use completed pixels from the current Displayable and
+  geometry, with unique PNG artifacts and frame IDs. Missing first paint has
+  explicit partial observation. GameCanvas maintains its own drawing buffer
+  across ordinary repaint and partial flush.
+- Reworked the public workflow suite and added readable fixtures for stable
+  field refs, command/row replacement, pending input, slow startup, colored
+  Canvas/GameCanvas frames and Alert facts. The suite also exercises bridge EOF,
+  text/JSON parity, storage rejection without changed saves and process cleanup.
+
 ## 2026-08-01
 
 - Closed the agent-facing gaps from `automation/ROADMAP.md`:

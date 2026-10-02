@@ -2,9 +2,9 @@ package emulator.cli.app;
 
 import emulator.cli.core.CliErrorCodes;
 import emulator.automation.shared.AutomationLimits;
-import emulator.cli.controller.*;
+import emulator.automation.shared.OperationDeadline;
+import emulator.cli.controller.ControllerClient;
 import emulator.cli.core.*;
-import emulator.cli.output.CliResponses;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
 import java.util.ArrayList;
@@ -24,10 +24,17 @@ public final class DragCommand implements CliCommand {
 
 		Integer delay = null;
 		boolean sawDelay = false;
+		boolean observe = false;
+		boolean literal = false;
 		List<Integer> coords = new ArrayList<Integer>();
 		for (int i = 1; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
-			if ("--delay".equals(token)) {
+			if (!literal && "--".equals(token)) {
+				literal = true;
+			} else if (!literal && "--observe".equals(token)) {
+				if (observe) throw CliParsing.duplicateOption(token, "drag", invocation.json());
+				observe = true;
+			} else if (!literal && "--delay".equals(token)) {
 				if (sawDelay) {
 					throw new KemuCliException(
 						CliErrorCodes.USAGE_ERROR, "Duplicate option: --delay.", "drag", invocation.json());
@@ -45,10 +52,12 @@ public final class DragCommand implements CliCommand {
 				delay = Integer.valueOf(CliParsing.parseIntegerArgument(
 					invocation.tokens().get(++i), "--delay", "drag", invocation.json()));
 				delay = Integer.valueOf(CliParsing.requireInclusiveRange(
-					delay.intValue(), 5, AutomationLimits.MAX_DRAG_DELAY_MS, "--delay", "drag", invocation.json()));
+					delay.intValue(), AutomationLimits.MIN_DRAG_DELAY_MS,
+					AutomationLimits.MAX_DRAG_DELAY_MS, "--delay", "drag", invocation.json()));
 			} else {
-				coords.add(Integer.valueOf(
-					CliParsing.parseIntegerArgument(token, "coordinate", "drag", invocation.json())));
+				int coordinate = CliParsing.parseIntegerArgument(token, "coordinate", "drag", invocation.json());
+				coords.add(Integer.valueOf(CliParsing.requireInclusiveRange(
+					coordinate, 0, Integer.MAX_VALUE, "coordinate", "drag", invocation.json())));
 			}
 		}
 
@@ -64,16 +73,17 @@ public final class DragCommand implements CliCommand {
 				.set("y", coords.get(i + 1).intValue()));
 		}
 
-		ControllerStatus status = ControllerLifecycle.requireRunningController("drag", invocation.json());
-		Json args = Json.object().set("points", points);
+		Json args = Json.object().set("points", points).set("waitDispatched", true);
 		if (delay != null) {
 			args.set("delayMs", delay.intValue());
 		}
 
-		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
-			ControllerStatusService.controllerClient(status), "app.drag", args, "drag", invocation.json()));
+		OperationDeadline deadline = invocation.deadline(AutomationLimits.DEFAULT_TIMEOUT_MS);
+		ControllerClient client = AgentCalls.client(invocation, "drag", deadline);
+		Json payload = AgentCalls.call(invocation, client, deadline, "app.drag", args, "drag");
+		payload = AgentCalls.afterAction(invocation, client, deadline, "drag", payload, observe);
 
 		return new CommandResult(
-			"drag", "Dragged across " + payload.at("points").asInteger() + " points.", payload, invocation.json());
+			"drag", payload, invocation.json());
 	}
 }

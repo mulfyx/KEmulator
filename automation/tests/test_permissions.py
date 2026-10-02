@@ -1,89 +1,106 @@
-"""Permission prompts: runtime, ordering, and startApp()-blocking requests."""
+"""Pending actions continue through permission refs without resubmission."""
+import pytest
 
 
-def _pending_permission_id(kemu):
-    request = kemu.state_of()["permissionRequest"]
-    assert request is not None
-    return int(request["id"])
+@pytest.fixture
+def permission_session(kemu_factory):
+    # A remembered decision is session policy; unrelated tests must not answer
+    # this callback before its pending/release behavior has been exercised.
+    cli = kemu_factory()
+    yield cli
+    cli.close_quietly()
+    cli.stop_force_quietly()
+    cli.shutdown_bridge()
+
+
+def _permission(kemu):
+    result = kemu.observe()
+    assert isinstance(result["permission"], dict)
+    return result["permission"]
+
+
+def _ask(kemu, label):
+    ref = kemu.command_ref(kemu.observe(), label)
+    return kemu.pending("activate", ref)
 
 
 def test_allow_and_deny(kemu, fixtures):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-
-    pending = kemu.run_command("Ask camera", wait_next=False)
-    assert pending["pending"] is True
-    assert pending["status"] == "pending-permission"
-    assert isinstance(pending["permissionRequest"], dict)
-    camera_id = _pending_permission_id(kemu)
-    assert camera_id == int(pending["permissionRequest"]["id"])
-    kemu.ok("permission", "allow", str(camera_id))
-    assert kemu.title() == "Camera allowed"
-
-    kemu.run_command("Ask IMEI", wait_next=False)
-    kemu.ok("permission", "allow", str(_pending_permission_id(kemu)))
-    assert kemu.title().startswith("IMEI allowed ")
+    pending = _ask(kemu, "Ask camera")
+    request = _permission(kemu)
+    assert request["ref"] == pending["permission"]["ref"]
+    assert request["name"] == "media.camera"
+    kemu.ok("permission", "allow", request["ref"])
+    kemu.wait_title("Camera allowed")
+    pending = _ask(kemu, "Ask IMEI")
+    kemu.ok("permission", "allow", pending["permission"]["ref"])
+    kemu.ok("wait", "screen", "--title-regex", r"^IMEI allowed ")
 
 
 def test_deny_reports_denied(kemu, fixtures):
     kemu.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
-    kemu.run_command("Ask camera", wait_next=False)
-    kemu.ok("permission", "deny", str(_pending_permission_id(kemu)))
-    assert kemu.title() == "Camera denied"
+    pending = _ask(kemu, "Ask camera")
+    kemu.ok("permission", "deny", pending["permission"]["ref"])
+    kemu.wait_title("Camera denied")
 
 
 def test_permission_ordering_race(kemu, fixtures):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    kemu.run_command("Ask permission race", wait_next=False)
-    kemu.ok("wait", "permission", "--timeout", "5000")
-
-    # The race fixture issues two requests from racing threads, so their ids
-    # may enqueue in either order; only the head may be answered.
-    head_id = _pending_permission_id(kemu)
-    kemu.err("permission", "deny", str(head_id + 100),
-             code="PERMISSION_ORDER_VIOLATION")
-    kemu.ok("permission", "allow", str(head_id))
-    kemu.ok("wait", "permission", "--timeout", "5000")
-    second_id = _pending_permission_id(kemu)
-    assert second_id != head_id
-
-    before = kemu.revision()
-    kemu.ok("permission", "deny", str(second_id))
-    kemu.ok("wait", "display", "--after-revision", str(before),
-            "--timeout", "5000")
-    assert kemu.title().startswith("Permission race ")
-    kemu.err("permission", "allow", str(second_id), code="UNKNOWN_PERMISSION_ID")
+    kemu.run("activate", kemu.command_ref(kemu.observe(), "Ask permission race"))
+    first = kemu.ok("wait", "permission", "--timeout", "5000")["permission"]
+    kemu.err("permission", "deny", "@unknown.permission", code="STALE_REF")
+    kemu.ok("permission", "allow", first["ref"])
+    second = kemu.ok("wait", "permission", "--timeout", "5000")["permission"]
+    assert first["ref"] != second["ref"]
+    kemu.ok("permission", "deny", second["ref"])
+    kemu.ok("wait", "screen", "--title-regex", r"^Permission race .*:(allow|deny)", "--timeout", "5000")
+    kemu.err("permission", "allow", second["ref"], code="STALE_REF")
 
 
 def test_allow_always_persists_for_worker(kemu, fixtures):
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    kemu.run_command("Ask camera", wait_next=False)
-    kemu.ok("permission", "allow", "--always")
-    assert kemu.title() == "Camera allowed"
+    first = _ask(kemu, "Ask camera")
+    kemu.ok("permission", "allow", first["permission"]["ref"], "--remember")
+    kemu.wait_title("Camera allowed")
+    completed = kemu.run_command("Ask camera")
+    assert "permission" not in completed
+    assert kemu.title(completed) == "Camera allowed"
 
-    completed = kemu.run_command("Ask camera", wait_next=False)
-    assert "pending" not in completed  # no prompt: policy persists for worker
-    assert kemu.title() == "Camera allowed"
-    assert kemu.state_of()["permissionRequest"] is None
+
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+def test_startup_permission_wait_ready_returns_pending(kemu, fixtures, oneshot):
+    opened = kemu.pending("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless", oneshot=oneshot)
+    request = opened["permission"]
+    assert request["ref"] and request["name"]
+    kemu.ok("permission", "deny", request["ref"])
+    kemu.wait_title("startup permission denied", timeout_ms=15000)
+    kemu.ok("wait", "ready", "--timeout", "15000")
 
 
 def test_startup_permission_async_open(kemu, fixtures):
-    opened = kemu.ok("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless")
-    assert opened["status"] == "starting"
-    assert opened["state"] is None
-    assert isinstance(opened["worker"]["pid"], str)
-
-    kemu.ok("wait", "permission", "--timeout", "30000")
-    kemu.ok("permission", "allow", str(_pending_permission_id(kemu)))
+    opened = kemu.pending("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless")
+    assert kemu.ok("status")["app"]["status"]
+    kemu.ok("wait", "permission", "--name", opened["permission"]["name"])
+    kemu.ok("permission", "allow", opened["permission"]["ref"])
     kemu.wait_title("startup permission allowed", timeout_ms=15000)
-    ready = kemu.ok("wait", "worker-ready", "--timeout", "15000")
-    assert ready["matched"] is True
 
 
-def test_startup_permission_wait_ready_returns_pending(kemu, fixtures):
-    opened = kemu.ok("open", fixtures["STARTUP_PERMISSION_JAR"], "--headless",
-                     "--wait-ready", "--open-timeout", "60000")
-    assert opened["status"] == "pending-permission"
-    assert isinstance(opened["state"]["permissionRequest"], dict)
-
-    kemu.ok("permission", "deny")
-    kemu.wait_title("startup permission denied", timeout_ms=15000)
+@pytest.mark.parametrize("oneshot", [False, True], ids=["bridge", "oneshot"])
+def test_permission_in_key_pressed_retains_paired_release(permission_session, fixtures, oneshot):
+    kemu = permission_session
+    kemu.open_ready(fixtures["AGENT_CONTRACT_JAR"])
+    kemu.run_command("Input permission")
+    cursor = kemu.ok("logs", "cursor")["cursor"]
+    pending = kemu.pending("key", "press", "5", oneshot=oneshot)
+    request = pending["permission"]
+    assert request["name"] == "media.camera"
+    # Introspection must remain reachable while the event callback is blocked.
+    assert _permission(kemu)["ref"] == request["ref"]
+    assert kemu.ok("status")["app"]["status"]
+    kemu.ok("permission", "allow", request["ref"])
+    kemu.ok("wait", "log", "--regex", "AGENT keyReleased", "--since", cursor, "--timeout", "10000")
+    kemu.wait_title("Input released")
+    lines = kemu.ok("logs", "--since", cursor)["lines"]
+    text = "\n".join(line["line"] for line in lines)
+    assert text.count("AGENT keyPressed entered") == 1
+    assert text.count("AGENT keyReleased") == 1

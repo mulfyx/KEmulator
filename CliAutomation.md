@@ -1,617 +1,133 @@
-# CLI Automation
+# Agent CLI
 
-KEmulator exposes a local automation CLI through `kemu.sh`. The CLI is intended
-for scripts and AI agents that need to inspect, launch, observe, and control
-J2ME MIDlets without manually driving the emulator UI.
+This branch implements the agent-oriented contract below for Linux.
+Old public commands and JSON shapes are replaced. Controller/worker RPC is
+internal. Build a release with `./build-release.sh` and run its `kemu.sh`.
+Build this checkout's TLS-enabled bundle with JDK 21 and use that JVM for TLS
+MIDlets; the TLS extension relies on modern JSSE APIs. The standalone CLI was
+also verified on Java 8 before integration. See [TlsSocketApi.md](TlsSocketApi.md).
 
-## Status
-
-- The current automation contract is Linux-only.
-- The public launcher is `kemu.sh`.
-- Automation uses a local controller/worker runtime and loopback transport.
-- The transport is a local convenience channel, not a security boundary.
-- The primary workflow is path-first: inspect an archive, then open that exact
-  path.
-
-## Build
-
-Build a release bundle before using the launcher from a fresh checkout. The
-build requires `java`, `javac`, and `jar`:
+## Workflow and options
 
 ```bash
-./build-release.sh [OUTPUT_DIR]
+export KEMU_SESSION=play
+./kemu.sh open app.jar
+./kemu.sh observe
+./kemu.sh set REF 'Alice'
+./kemu.sh activate REF
+./kemu.sh key press 5
+./kemu.sh observe
+./kemu.sh close
+./kemu.sh stop
 ```
 
-When `OUTPUT_DIR` is omitted, the default bundle is written to:
-
-```text
-dist/release-linux/
-```
-
-The bundle contains `KEmulator.jar`, `kemu.sh`, `lib/`, and `home/`.
-The build refuses to overwrite a live release bundle while matching controller
-or worker processes are still running.
-
-## Basic Flow
-
-Use `--json` for automation. Successful and expected failure responses are
-printed as a single JSON envelope on stdout.
-
-Run examples from the repository root with `./kemu.sh`. From a packaged bundle,
-run that bundle's `./kemu.sh`.
-
-```bash
-./kemu.sh inspect ./app.jar --json
-./kemu.sh --session-id test-1 open ./app.jar --headless \
-  --data-dir /tmp/kemu-test-1 --reset-state --worker-xmx 64M \
-  --wait-ready --json
-./kemu.sh --session-id test-1 wait display --kind list --timeout 5000 --json
-./kemu.sh --session-id test-1 observe --json
-./kemu.sh --session-id test-1 key press FIRE --wait-dispatched --json
-./kemu.sh --session-id test-1 screenshot ./screen.png --json
-./kemu.sh --session-id test-1 close --json
-./kemu.sh --session-id test-1 stop --force --json
-```
-
-For `.jad` files, `MIDlet-Jar-URL` should resolve to a local relative JAR path.
-If it is missing, the inspector tries a sibling `.jar` with the same base name.
-
-`inspect` returns `suiteProperties`: the merged JAD/MANIFEST map exactly as the
-app sees it through `MIDlet.getAppProperty()`. JAD keys win per key, MANIFEST
-fills in missing keys, and MANIFEST-only keys survive even when the JAD defines
-its own `MIDlet-1`. When the JAD defines `MIDlet-1`, the launchable MIDlet list
-comes from the JAD alone. The worker applies the same merge, so
-`suiteProperties` is authoritative for what a running MIDlet will read.
-
-## Lifecycle
-
-`open` starts the controller automatically when needed, then opens the requested
-MIDlet. `close` closes only the active MIDlet. `stop --force` stops the
-controller runtime and should be reserved for cleanup, recovery, or changing
-controller defaults.
-
-`open` without `--wait-ready` returns right after the worker process is
-spawned. The result carries `status: "starting"`, `state: null`, and the
-worker identity; use `wait worker-ready` (or `observe`) to wait for the MIDlet.
-`open --wait-ready` blocks until one of:
-
-- the MIDlet display is ready: `status: "ready"`;
-- a permission request blocked `startApp()`: `status: "pending-permission"`
-  with `permissionRequest` set. Answer it with `permission allow|deny` and
-  continue with `wait worker-ready`;
-- the worker exits: `WORKER_FAILURE` with `details.reason: "worker-exited"`,
-  the exit code, `logTail`, and a `causeHint` line extracted from the log;
-- the startup timeout elapses: `OPEN_TIMEOUT`. The default timeout is 30000 ms
-  and `--open-timeout MS` (1..600000) overrides it.
-
-A worker in the `starting` state is already registered: `state`, `observe`,
-`logs`, `wait permission`, and `permission allow|deny` reach it before
-`startApp()` has returned. Commands sent before the worker socket accepts
-connections are retried briefly and then fail with `WORKER_STARTING`.
-
-After a failed `open`, `logs cursor`, `logs read`, and `wait log` still
-address the failed worker until the next `open` or an explicit `close`.
-
-## Commands
-
-- `help [command...]`
-- `bridge`
-- `start [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH]`
-- `status`
-- `stop [--force]`
-- `logs cursor`
-- `logs read [--since CURSOR] [--jsonl]`
-- `inspect <path>`
-- `open <path> [--midlet N] [--headless|--visible] [--runtime <advertised-runtime>] [--size WxH] [--data-dir DIR] [--rms-dir DIR] [--file-root DIR] [--reset-state] [--reset-file-root] [--worker-xmx SIZE] [--wait-ready] [--open-timeout MS]`
-- `close`
-- `state`
-- `state snapshot FILE`
-- `state restore FILE`
-- `rms reset`
-- `rms export FILE`
-- `rms import FILE`
-- `observe [--screenshot FILE]`
-- `events read [--since CURSOR] [--jsonl]`
-- `screenshot FILE`
-- `wait display [--kind KIND] [--title TITLE] [--title-regex REGEX] [--selected-index N] [--after-revision REV] [--timeout MS]`
-- `wait worker-ready [--timeout MS]`
-- `wait worker-exit [--timeout MS]`
-- `wait idle [--timeout MS]`
-- `wait frame [--after-revision REV] [--timeout MS]`
-- `wait permission [--name NAME] [--timeout MS]`
-- `wait log --regex REGEX [--since CURSOR] [--timeout MS]`
-- `key press <key> [--duration MS] [--wait-dispatched]`
-- `key hold <key> [--duration MS] [--wait-dispatched] [--wait-release]`
-- `key down <key> [--wait-dispatched]`
-- `key up <key> [--wait-dispatched]`
-- `pointer tap <x> <y> [--wait-dispatched]`
-- `pointer down <x> <y> [--wait-dispatched]`
-- `pointer up <x> <y> [--wait-dispatched]`
-- `drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--delay MS]`
-- `list select INDEX [--expect-revision REV] [--timeout MS]`
-- `list move <up|down> [--count N] [--expect-revision REV] [--timeout MS]`
-- `choice set INDEX [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
-- `gauge set VALUE [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
-- `text-field set TEXT [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
-- `text-box set TEXT [--expect-revision REV] [--timeout MS]`
-- `date-field set EPOCH_MS [--item-index INDEX] [--expect-revision REV] [--timeout MS]`
-- `pause [--expect-revision REV] [--timeout MS]`
-- `resume [--expect-revision REV] [--timeout MS]`
-- `resize WIDTHxHEIGHT [--expect-revision REV] [--wait-frame] [--timeout MS]`
-- `rotate [--expect-revision REV] [--wait-frame] [--timeout MS]`
-- `command run <--id ID|--label LABEL> [--expect-revision REV] [--wait-next-display] [--timeout MS]`
-- `permission allow [id] [--once|--always]`
-- `permission deny [id]`
-
-`--session-id ID` is a global option and may be added to every command.
-
-`help --json` additionally returns `result.commands`: the machine-readable
-list of every registered command path. Run command-specific help with:
-
-```bash
-./kemu.sh help open --json
-```
-
-The launcher also accepts `--help`, `-h`, and command help such as:
-
-```bash
-./kemu.sh open --help
-```
-
-Use `open -- <path>` when an archive path begins with `--`.
-
-Runtime names are launcher-dependent. A packaged bundle normally advertises
-`release`; a repository checkout may advertise values such as `dev-linux` and
-`release`. Query the active launcher with `help start` or `help open` and pass
-one of the advertised values.
-
-## Bridge Mode (JSONL)
-
-`kemu bridge` serves many commands from one long-lived CLI process, removing
-the per-command JVM startup cost. Each stdin line is a request; each stdout
-line is the normal JSON envelope plus the echoed `id`:
-
-```text
-> {"id": 1, "argv": ["open", "./app.jar", "--headless", "--wait-ready"]}
-< {"id": 1, "ok": true, "command": "open", "result": {...}}
-```
-
-- `argv` is an array of plain argument strings: no shell quoting rules.
-- The session id is fixed per bridge process (`--session-id` inside a
-  request is rejected); `--json` is implied; `bridge` cannot be nested.
-- Malformed request lines produce an error envelope with `"id": null`.
-- Responses are written in request order; EOF on stdin terminates the
-  bridge with exit code `0`. Per-command process exit codes do not exist in
-  bridge mode; branch on `ok` and `error.code`.
-
-## JSON Contract
-
-`--json` is a global flag. In JSON mode, parse stdout as the single response
-envelope even when the process exits nonzero. Do not scrape stderr or human text
-for automation control flow.
-
-`--json` may appear anywhere before a literal `--` marker; after `--` it is
-treated as a plain argument. Documentation examples place it at the end for
-consistency. In shell scripts that use `set -e`, capture stdout and
-the exit code explicitly so a JSON failure response is still available to parse.
-Missing or invalid JSON usually means launcher bootstrap failure, transport
-failure, or a process-level crash.
-
-Success responses use this shape:
-
-```json
-{
-  "ok": true,
-  "command": "observe",
-  "result": {}
-}
-```
-
-Expected failures use this shape:
-
-```json
-{
-  "ok": false,
-  "command": "open",
-  "error": {
-    "code": "PATH_NOT_FOUND",
-    "message": "Path not found: ./missing.jar",
-    "details": {}
-  }
-}
-```
-
-`error.details` is optional and contains operation-specific context when
-available, such as permission ids, controller endpoint data, or
-failed paths.
-
-Automation callers should branch on `ok` and `error.code`, not on localized or
-human-readable text.
-
-Common error codes include:
-
-- `USAGE_ERROR`
-- `UNKNOWN_COMMAND`
-- `JAVA_NOT_FOUND`
-- `PATH_NOT_FOUND`
-- `UNSUPPORTED_INPUT`
-- `NO_RUNTIME`
-- `UNKNOWN_RUNTIME`
-- `AMBIGUOUS_RUNTIME`
-- `DISPLAY_REQUIRED`
-- `HEADLESS_DEPENDENCY_MISSING`
-- `HEADLESS_UNSUPPORTED`
-- `MISSING_SWT`
-- `CONTROLLER_NOT_RUNNING`
-- `CONTROLLER_UNREACHABLE`
-- `CONTROLLER_ERROR`
-- `CONFLICTING_CONTROLLER_DEFAULTS`
-- `INVALID_REQUEST`
-- `START_FAILED`
-- `START_TIMEOUT`
-- `STOP_FAILED`
-- `APP_ALREADY_OPEN`
-- `APP_ACTIVE`
-- `NO_ACTIVE_APP`
-- `APP_INPUT_UNAVAILABLE`
-- `MIDLET_SELECTION_REQUIRED`
-- `UNKNOWN_MIDLET`
-- `STALE_REVISION`
-- `STORAGE_ERROR`
-- `STORAGE_OVERLAP`
-- `TIMEOUT`
-- `WORKER_STARTING`
-- `LCDUI_CONTROL_UNAVAILABLE`
-- `UNKNOWN_KEY`
-- `UNKNOWN_COMMAND_ID`
-- `UNKNOWN_PERMISSION_ID`
-- `PERMISSION_ORDER_VIOLATION`
-- `OPEN_TIMEOUT`
-- `SCREENSHOT_FAILED`
-- `SCREENSHOT_WRITE_FAILED`
-- `WORKER_FAILURE`
-- `INTERNAL_ERROR`
-
-## Exit Codes
-
-- `0`: success
-- `2`: usage or request contract error
-- `3`: path not found
-- `4`: runtime, controller, or internal failure
-
-JSON failures still exit nonzero. The exit code is a pure function of
-`error.code`: codes meaning "an identical request can never succeed" (usage,
-unknown ids/keys, stale revisions, `LCDUI_CONTROL_UNAVAILABLE`,
-`STORAGE_OVERLAP`) map to `2`, missing paths to `3`, everything else to `4`.
-
-## Observing UI State
-
-Use `status` for controller health. The session snapshot is one canonical
-object that always lives under the `state` key:
-
-- `observe` and `state` return `{active, app, state}`;
-- a ready `open` returns `{app, worker, status, state}` with the same
-  snapshot;
-- error details that carry a snapshot use `lastState`.
-
-The snapshot (`schemaVersion` currently `3`) contains: monotonic `revision`,
-`frameRevision`, `eventCursor`, `ready`, `midletStarted`, screen `width` and
-`height`, `permissionRequest`, `memoryCard`, storage paths, and one LCDUI
-representation in `state.displayable` with `kind`, `title`, `softkeys`,
-`commands`, and control-specific data for `List`, `Form`, `StringItem`,
-`ChoiceGroup`, `Gauge`, `TextField`, `TextBox`, `Alert`, and `Canvas`.
-
-`observe` is the preferred command for agents. `state` still requires a
-running controller and can return `WORKER_FAILURE` if the worker process has
-died. Check `result.active` before reading `result.state`.
-
-## Revisions And Atomic Commands
-
-The preferred command flow is atomic and does not require a separate command
-snapshot:
-
-```bash
-state="$(./kemu.sh observe --json)"
-revision="$(printf '%s\n' "$state" | jq -r '.result.state.revision')"
-./kemu.sh command run --label Exit \
-  --expect-revision "$revision" \
-  --wait-next-display --timeout 5000 --json
-```
-
-`--expect-revision` is optional for every mutation (`command run`, the native
-control setters, `resize`, `rotate`) and recommended for all of them. When it
-is present and stale the operation returns `STALE_REVISION` with
-`{expectRevision, currentRevision}` details and performs no mutation. Every
-mutation result has the uniform shape `{oldRevision, newRevision, elapsedMs,
-state, ...}`. A successful result includes `oldRevision`, `newRevision`,
-`elapsedMs`, the resulting state, and (with `--wait-next-display`) transition
-details. Rendering a frame does not advance the display `revision`;
-`frameRevision` records the newest display revision that has actually been
-painted, so repaint traffic cannot invalidate an otherwise current command.
-LCDUI commands and native control mutations run on the LCDUI event
-thread and return only after their model mutation or callback completes.
-If a callback blocks on an automation-visible permission request,
-`command run` instead returns a successful result with
-`status: "pending-permission"`, `pending: true`, and `permissionRequest`.
-The command remains suspended on the LCDUI event thread until that request is
-answered; its eventual completion is emitted as `command-finished`.
-When `--wait-next-display` was requested, the pending result sets
-`waitNextDisplayRequested: true` but does not claim that a display transition
-already occurred.
-`--wait-next-display` also recognizes a structured display transition when an
-application reuses one `Displayable` object but replaces its title or contents.
-
-Command entries in `result.state.displayable.commands` can include `id`, `text`,
-`choice`, `selected`, `label`, `type`, and `priority`. Commands bound to a
-softkey also carry `softkey: "left"|"right"`; `softkeyOnly: true` marks the
-BACK/EXIT-style commands that the on-screen menu omits — they are still
-invokable by id, no key press needed. Every invocation requires
-the observation revision. After any UI-changing action, call `observe --json`
-again. On `STALE_REVISION` or `UNKNOWN_COMMAND_ID`, re-observe and reselect the
-command by stable fields such as `label`, `text`, `type`, or `priority`.
-
-## Permissions
-
-When `result.permissionRequest` is non-null, the MIDlet may be blocked waiting
-for an answer. The request includes its stable `name` where KEmulator can
-identify one, for example `javax.microedition.io.Connector.file.read`. Read
-`result.permissionRequest.id` and answer it with:
-
-```bash
-./kemu.sh permission allow <id> --json
-./kemu.sh permission deny <id> --json
-./kemu.sh permission allow --once --json
-./kemu.sh permission allow --always --json
-```
-
-Only the head pending permission can be answered. If the CLI returns
-`UNKNOWN_PERMISSION_ID` or `PERMISSION_ORDER_VIOLATION`, call `observe --json`
-again and use the current `permissionRequest.id`.
-
-After answering a permission request, call `observe --json` before issuing the
-next UI command because the screen revision and command set may have changed.
-When the id is omitted, the head pending permission is answered atomically.
-`--always` changes the permission policy for the remaining lifetime of that
-worker; it does not claim device-level or OS-level persistence. If a permission
-request disappears while an agent is deciding, call `observe --json` and
-continue from the new state.
-
-## Input
-
-`key press` and `pointer tap` deliver a full stroke. For chords and holds use
-the half-stroke forms: `key down`/`key up` keep a key held (several keys can
-be held at once), and `pointer down`/`pointer up` keep the pointer pressed
-between coordinates. Every held key or pointer is released when the worker
-exits, not automatically between commands.
-
-Useful key names:
-
-- `UP`, `DOWN`, `LEFT`, `RIGHT`
-- `FIRE`, `OK`, `MIDDLE`
-- `LSK`, `SOFT_LEFT`, `S1`
-- `RSK`, `SOFT_RIGHT`, `S2`
-- `NUM0` through `NUM9`
-- `0` through `9`
-- `STAR`
-- `*`
-- `POUND`
-- `#`
-
-Limits and defaults:
-
-- every `--timeout MS` accepts `0..120000` and defaults to `5000`; waits use
-  condition variables or file events rather than polling sleeps. The only
-  exception is `open --open-timeout MS`: `1..600000`, default `30000`.
-- `--duration MS` accepts `10..5000`; `key press` defaults to `80`,
-  `key hold` to `500`.
-- `drag --delay MS` accepts `5..1000` and defaults to `20`.
-- `drag` requires at least two points and an even coordinate count.
-- `pointer tap` and `drag` coordinates must be non-negative integers.
-- screen sizes (`--size`, `resize`) accept `1..4095` per dimension.
-- wait results share one shape: `{condition, matched: true, elapsedMs}` plus
-  condition extras (`state`, `exitCode` for `worker-exit`, `frameRevision`,
-  log `cursor`/`text`). `wait display` requires at least one filter;
-  `wait frame --after-revision` defaults to the current frame revision.
-
-For Canvas games, numeric keypad input is often more reliable than directional
-aliases because many J2ME games document movement as `1` through `9`.
-
-## MIDlet Lifecycle
-
-`pause` and `resume` drive the MIDP lifecycle the way a handset interruption
-does: `pause` delivers `hideNotify` to a Canvas, sets the paused flag, and
-calls `pauseApp()`; `resume` calls `startApp()` again and delivers
-`showNotify`. Both acknowledge only after the worker reports the new state
-and return the uniform mutation shape plus `paused`. While paused, the LCDUI
-event queue is idle: `observe` still works, but LCDUI mutations time out
-until `resume`.
-
-## Screenshots And Canvas Text
-
-The CLI can expose structured text for LCDUI widgets such as `List` and
-`TextBox`. Canvas games are different: the game draws pixels directly, so text
-rendered inside the Canvas is not available as structured state.
-
-For Canvas games, use screenshots and an OCR or vision layer when an agent needs
-to understand on-screen text.
-
-```bash
-./kemu.sh screenshot ./screen.png --json
-```
-
-The output file argument is positional; the bytes are always PNG regardless
-of the file extension. Parent directories are created automatically. The JSON
-response returns metadata such as `app`, nested `state`, `saved: true`, and
-`path`; it does not embed screenshot bytes. File creation and write failures
-return `SCREENSHOT_WRITE_FAILED`.
-
-`observe --screenshot FILE` captures the state and the image in one worker
-call, so the snapshot and the picture cannot drift apart; the response adds
-`screenshot: {saved, path}`.
-
-Use unique screenshot paths for each observation step so an agent does not read
-stale image files. Treat `state.width` and `state.height` from `observe` as the coordinate
-space for `tap` and `drag`.
-
-## Headless And Visible Modes
-
-Headless mode currently requires Linux and `xvfb-run`:
-
-```bash
-./kemu.sh open ./app.jar --headless --json
-```
-
-Visible mode requires an X11 `DISPLAY`:
-
-```bash
-./kemu.sh open ./app.jar --visible --json
-```
-
-If neither a display nor `xvfb-run` is available, the CLI returns a runtime
-error such as `DISPLAY_REQUIRED` or `HEADLESS_DEPENDENCY_MISSING`.
-
-When no mode is specified, the controller chooses visible mode if `DISPLAY`
-exists, otherwise headless mode on Linux if `xvfb-run` exists. The default screen
-size is `240x320`. Controller startup waits up to `30000` ms before returning
-`START_TIMEOUT`.
-
-If a controller is already running, explicit `--runtime`, mode, or `--size`
-values must match that controller. Conflicts return
-`CONFLICTING_CONTROLLER_DEFAULTS`.
-
-Each `--session-id` owns its controller state, loopback port, worker, logs,
-captures, and default writable data tree. Headless controllers own a private
-`xvfb-run` lifecycle; `stop` is idempotent and shuts down the worker before the
-controller exits.
-
-## Writable Session Storage
-
-The release bundle may be mounted read-only. Controller state automatically
-falls back to a writable temporary automation root when the bundle directory is
-not writable; `KEMU_AUTOMATION_DIR` can select an explicit root. Worker writes
-go to `--data-dir`, `--rms-dir`, and `--file-root`.
-
-For compatibility with existing bundles, an implicit file root is seeded once
-from the bundle's legacy `file/root` directory when the session file root does
-not yet exist. Later reads and writes use only the session copy. Explicit data,
-RMS, and file roots that overlap the runtime bundle are rejected.
-
-`--reset-state` deletes the session data tree (data dir, RMS dir, and the
-implicit session file root). An explicit `--file-root` is treated as external
-storage and is preserved; deleting it requires the additional opt-in
-`--reset-file-root`. Before anything is deleted, every reset root is checked
-against the launch JAD/JAR (symlinks resolved): if a reset root contains a
-launch artifact, `open` fails with `STORAGE_OVERLAP` before any mutation, so a
-rejected request leaves the disk untouched.
-
-```bash
-./kemu.sh --session-id a open app.jar \
-  --data-dir /tmp/kemu-a \
-  --rms-dir /tmp/kemu-a/rms \
-  --file-root /tmp/kemu-a/files \
-  --reset-state --worker-xmx 64M --wait-ready
-
-./kemu.sh --session-id a close
-./kemu.sh --session-id a rms export /tmp/a-rms.zip
-./kemu.sh --session-id a state snapshot /tmp/a-state.zip
-```
-
-All five storage commands (`rms reset|export|import`, `state
-snapshot|restore`) require the session app to be closed so the archive is
-consistent; an active app fails them with `APP_ACTIVE`. Archives validate their
-schema and paths before replacing session data. RMS index updates use an atomic
-replace so another MIDlet thread cannot observe a truncated index.
-
-`KEMU_WORKER_JAVA_OPTS` supplies additional worker JVM options. An explicit
-`--worker-xmx` replaces any `-Xmx` in that variable. `status --json` reports
-controller and worker JVM options, both PIDs, data paths, and the configured
-emulated heap when one exists.
-
-### Memory card mapping
-
-The guest property `fileconn.dir.memorycard` defaults to `file:///root/e/`,
-which maps to the `e/` directory under the session file root. Drive-letter
-URLs are case-insensitive: `file:///E:/x` and `file:///e:/x` resolve to the
-same `<fileRoot>/e/x` host path. The effective mapping is visible in
-`open`, `state`, and `observe` responses as:
-
-```json
-"memoryCard": {
-  "guestUrl": "file:///root/e/",
-  "fileRoot": "/tmp/kemu-a/files",
-  "hostPath": "/tmp/kemu-a/files/e"
-}
-```
-
-## Event And Log Cursors
-
-`events read` uses its own schema (`schemaVersion` `2` on the payload and on
-every event line) and a numeric sequence cursor (`--since SEQ`). Worker log
-cursors are opaque strings (`--since CURSOR`). `events read --jsonl` returns
-structured JSONL events such as
-`display-changed`, `selection-changed`, `command-finished`,
-`input-dispatched`, and `frame-rendered`. Use `eventCursor` or an event
-`cursor` as the next `--since` value.
-
-```bash
-cursor="$(./kemu.sh logs cursor --json | jq -r '.result.cursor')"
-./kemu.sh wait log --since "$cursor" --regex 'STATUS=PASS' --timeout 10000
-./kemu.sh logs read --since "$cursor" --jsonl
-```
-
-## Troubleshooting
-
-Useful first checks:
-
-```bash
-./kemu.sh status --json
-./kemu.sh logs cursor --json
-./kemu.sh logs read --jsonl
-```
-
-Reset a stuck run with:
-
-```bash
-./kemu.sh stop --force --json
-```
-
-- `DISPLAY_REQUIRED`: set X11 `DISPLAY` or use `--headless`.
-- `HEADLESS_DEPENDENCY_MISSING`: install `xvfb-run` or use visible mode with
-  `DISPLAY`.
-- `UNKNOWN_RUNTIME`: run `./kemu.sh help start --json` and use an advertised
-  runtime.
-- `CONTROLLER_UNREACHABLE`: run `./kemu.sh stop --force --json`, then start
-  again.
-- `NO_ACTIVE_APP` from `logs read` after `close`: expected when no MIDlet is
-  active. After a failed `open`, `logs read` still works and returns the
-  failed worker log.
-- `WORKER_STARTING`: the worker process exists but its command socket is not
-  accepting connections yet; retry, or use `wait worker-ready`.
-- `STORAGE_OVERLAP`: a `--reset-state` root would delete the launch JAD/JAR or
-  an explicit `--file-root`; nothing was deleted. Move the writable roots away
-  from the launch artifacts or pass `--reset-file-root` intentionally.
-- `STALE_REVISION`: run `observe --json` again and retry with the new revision.
-- `SCREENSHOT_WRITE_FAILED`: check the parent directory, permissions, and that
-  the output argument is a writable file path.
-
-## Agent Guidance
-
-- Always pass `--json`.
-- Start with `inspect <path>` before `open <path>`.
-- Prefer absolute or clearly rooted paths in automation scripts.
-- Use condition waits after actions instead of fixed sleeps and repeated
-  observations.
-- Use `revision` guards for LCDUI controls and atomic commands.
-- Answer pending permissions before normal UI input.
-- Use screenshots with unique output paths for Canvas games and visual
-  verification.
-- Clean up with `close --json`, then `stop --force --json` at the end of a run.
-- Treat `close` responses such as `closed: false` and `stop` responses such as
-  `stopped: false, reason: "not_running"` as successful cleanup.
-- Do not kill controller PIDs manually from an agent script; use
-  `status --json` and `stop --force --json`.
-- If `status` reports `pidIdentityMatches: false`, do not kill the PID manually;
-  recover with `stop --force --json`.
-- Do not retry unchanged requests for usage errors, missing paths, unsupported
-  input, unknown keys, or unknown MIDlet indexes.
-- Treat the loopback controller as local process automation, not as a remote API.
+Global options: `--session NAME`, `--json`, `--verbose`, `--timeout MS`.
+The unnamed session is `default`; agents should choose their own session.
+`--json` selects representation, `--verbose` adds diagnostics, neither
+changes execution. Literal `--` protects argument values.
+
+## Public result
+
+One-shot responses have `command`, `outcome`, and `result` or `error`.
+Outcomes are `done`, `pending`, `error`. Optional top-level `diagnostics`
+appears only with `--verbose`; bridge additionally echoes `id`.
+Done means the command reached its documented threshold. Pending means a
+permission suspended it: answer the permission, do not repeat the action.
+Errors have stable `code`, readable `message`, relevant `details`.
+Exit: 0 done, 5 pending, 2 invalid request/usage, 3 input/path/archive,
+4 runtime. JSON is one stdout envelope even on failure; text errors go to
+stderr. Both renderers use the same public result.
+
+Observation-bearing results contain `session: {id,status}`,
+`app: {name,status}`, and `observation`. Actions may add an `action`
+receipt with operation/ref/actual value. Current permission is a sibling
+`permission: {ref,id,name,message,actions}` and appears first in text.
+
+An observation has `kind`, `title`, `size: {width,height}`, `nodes`,
+`commands`; include `contentSize` if different from screen size, `ticker`
+when present, and `image` when captured. Nodes use readable `role`,
+`label`, `value`, `selected`, `focused`, `actions` and applicable limits.
+Choice groups contain child `nodes`; commands are not duplicated as rows.
+Examples: text-field ref + actions [set] + constraints [numeric] +
+maxLength; gauge ref + value/min/max + [set]; option ref + selected +
+[select]; command ref + label/softkey + [activate]. Read-only text has no
+mutation ref. TextBox content is a settable node; Alert body/ticker are
+readable text. Values are never silently truncated.
+
+Refs are opaque `@RUN.eN` tokens bound to live targets: Command+owner,
+Item+owner, collection+structural identity/generation+row. Changing a value
+or selection preserves unrelated refs. Removal/replacement/owner change
+or worker restart makes a ref stale. Validate membership, type and action
+immediately before LCDUI mutation; global revision is not target identity.
+Tokens are never reassigned. No snapshot history/TTL is needed.
+
+## Command surface
+
+- `inspect APP`: metadata/MIDlet choices; suite properties are verbose.
+- `open APP [--midlet N] [--visible|--headless] [--size WxH] [storage options]`:
+  auto-start session, launch and wait for first display or permission;
+  return initial observation. Startup timeout retains the launched worker.
+- `status`: session availability, app state, blocker/failure. PID, JVM,
+  classpath and internal paths are diagnostic only.
+- `close`: close MIDlet, retain reusable session. `stop`: terminate this
+  session's controller, worker and private display.
+- `observe [--screenshot FILE]`, `screenshot [FILE]`.
+- `activate REF`: invoke command; implicit List row selects+invokes its
+  select callback as one guarded operation.
+- `select REF [--off]`: select List/Choice row without activation;
+  off only for multiple selection.
+- `set REF VALUE`: TextField/TextBox, integer Gauge, DateField. Dates
+  accept ISO date/time appropriate to input mode or epoch milliseconds.
+- `key press KEY [--duration MS]`, `key hold KEY [--duration MS]`,
+  `key down KEY`, `key up KEY`.
+- `pointer tap X Y`, `pointer down X Y`, `pointer up X Y`,
+  `drag X1 Y1 X2 Y2 ... [--delay MS]`.
+- `pause`, `resume`, `resize WxH`, `rotate`.
+- `wait screen [--kind KIND] [--title TITLE] [--title-regex REGEX] [--text TEXT]`;
+  `wait ready`, `wait exit`, `wait frame [--after FRAME_ID]`,
+  `wait permission [--name NAME]`, `wait log --regex REGEX [--since CURSOR]`.
+- `permission allow REF [--remember]`, `permission deny REF`.
+- `logs [--since CURSOR] [--jsonl]`, `logs cursor`.
+- `storage snapshot FILE`, `storage restore FILE`, `storage rms reset`,
+  `storage rms export FILE`, `storage rms import FILE`.
+- `bridge`: JSONL `{id,argv}` input, same public envelopes with echoed id;
+  fixed session, EOF closes bridge but not session.
+- `help [COMMAND...]`: workflow first, precise command options/key names
+  on demand. Bare read-only state/start/old native setters are not public.
+
+Native activate/select/set and pause/resume/resize/rotate return a receipt
+plus current observation. Physical input returns delivery receipt;
+`--observe` additionally requests UI. Dispatch/applied value/completed
+callback does not promise game-level transition; wait for a condition.
+
+## Canvas and deadlines
+
+Canvas observation saves a unique PNG and exposes image
+`{path,width,height,frameId}`. Use a completed frame of the CURRENT
+Displayable/geometry, copied consistently. After display switch wait for
+its first paint within the operation budget; never label old pixels as
+the new screen. Missing frame is explicit with useful partial observation.
+frameId identifies completed frames, not model revision. Native capture
+is explicit via screenshot/observe --screenshot. No OCR/cache/history.
+
+One finite operation budget is passed as remaining time to queue, worker
+and callbacks. Transport gets sufficient allowance. Ordinary timeout is
+not a worker-kill policy. Queued action timeout exposes unknown effect;
+observe before retry, no automatic retries. Input callbacks may return
+pending permission. Composite press/hold/tap/drag guarantees matching
+release is scheduled/enqueued on pending/timeout/interruption. Separate
+down/up intentionally holds. Permission/status/observe remain reachable
+while callback is blocked; answer continues original action.
+
+Mutable data/captures live outside bundle. Validate storage and JVM
+request before reset/import deletion; preserve saves on rejected requests.
+
+## Acceptance
+
+One-pass delivery requires Java 8 build and public one-shot/bridge suite:
+two fields set from one observation; async commands/rows never redirect
+old ref; old-worker refs rejected; select differs from activate;
+permission in keyPressed retains matching release; startup timeout keeps
+worker; queued timeout reports unknown effect; current Canvas pixels;
+equivalent task facts in text/JSON; storage rejection preserves data;
+close/reopen and stop leave no leaked processes. No W4ME compatibility gate.

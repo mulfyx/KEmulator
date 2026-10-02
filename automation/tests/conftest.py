@@ -28,7 +28,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from kemu import KemuCli, parse_usage_commands  # noqa: E402
+from kemu import KemuCli  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,7 +92,7 @@ def known_commands(release_dir) -> set[str]:
     """The public command surface, machine-readable from the registry."""
     probe = KemuCli(release_dir, session_id=f"pt-probe-{uuid.uuid4().hex[:8]}")
     commands = set(probe.ok("help", oneshot=True)["commands"])
-    assert "open" in commands and "list select" in commands, commands
+    assert "open" in commands and "select" in commands, commands
     return commands
 
 
@@ -108,9 +108,6 @@ def kemu_factory(release_dir, known_commands):
             known_commands=known_commands,
         )
         created.append(cli)
-        if start:
-            cli.ok("start", "--headless", "--runtime", "release",
-                   "--size", "240x320")
         return cli
 
     yield make

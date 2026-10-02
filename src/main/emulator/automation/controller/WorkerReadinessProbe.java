@@ -1,13 +1,10 @@
 package emulator.automation.controller;
 
 import emulator.automation.shared.AutomationErrorCodes;
+import emulator.automation.shared.OperationDeadline;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardWatchEventKinds;
-import java.nio.file.WatchKey;
-import java.nio.file.WatchService;
-import java.util.concurrent.TimeUnit;
 import mjson.Json;
 
 final class WorkerReadinessProbe {
@@ -88,9 +85,12 @@ final class WorkerReadinessProbe {
 			AutomationErrorCodes.WORKER_FAILURE, message.toString(), worker, details);
 	}
 
-	private static Json probeSession(WorkerProcess worker) {
+	private static Json probeSession(WorkerProcess worker, OperationDeadline deadline) {
 		try {
-			return WorkerProtocolClient.call(worker, "session", Json.object(), NO_TERMINATE_HANDLER);
+			long remaining = deadline.remainingMillis();
+			return WorkerProtocolClient.call(worker, "session", Json.object()
+				.set("timeoutMs", remaining)
+				.set("_transportTimeoutMs", Math.min(remaining, SESSION_PROBE_INTERVAL_MS)), NO_TERMINATE_HANDLER);
 		} catch (IOException ignored) {
 			return null;
 		} catch (RuntimeException ignored) {
@@ -99,61 +99,41 @@ final class WorkerReadinessProbe {
 	}
 
 	static Json waitUntilReady(WorkerProcess worker, long timeoutMs) throws Exception {
-		long start = System.nanoTime();
-		long deadline = start + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-		WatchService watchService = worker.readyPath.getFileSystem().newWatchService();
-		worker.readyPath.getParent().register(
-			watchService,
-			StandardWatchEventKinds.ENTRY_CREATE,
-			StandardWatchEventKinds.ENTRY_MODIFY);
-		try {
-			while (true) {
-				if (!worker.process.isAlive()) {
-					throw workerExitFailure(worker);
-				}
-
-				if (Files.isRegularFile(worker.readyPath)) {
-					Json session = WorkerProtocolClient.call(
-						worker, "session", Json.object(), WorkerProcessTerminator.timeoutHandler());
-					if (session.at("ready", false).asBoolean()) {
-						return session;
-					}
-					throw WorkerDiagnostics.workerFailure(
-						AutomationErrorCodes.OPEN_TIMEOUT,
-						"Worker ready marker was written before the MIDlet display became ready",
-						worker,
-						Json.object().set("lastSession", WorkerDiagnostics.stripImage(session)));
-				}
-
-				// startApp() may be blocked on a permission request before the
-				// ready marker exists; surface that instead of timing out.
-				Json session = probeSession(worker);
-				if (session != null
-					&& session.has("permissionRequest")
-					&& !session.at("permissionRequest").isNull()) {
-					return WorkerDiagnostics.stripImage(session);
-				}
-
-				long remaining = deadline - System.nanoTime();
-				if (remaining <= 0L) {
-					break;
-				}
-				WatchKey key = watchService.poll(
-					Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(SESSION_PROBE_INTERVAL_MS)),
-					TimeUnit.NANOSECONDS);
-				if (key != null) {
-					key.pollEvents();
-					key.reset();
+		OperationDeadline deadline = OperationDeadline.afterMillis(timeoutMs);
+		Json lastSession = null;
+		while (!deadline.timedOut()) {
+			if (!worker.process.isAlive()) {
+				throw workerExitFailure(worker);
+			}
+			// A first Displayable is usable even while startApp is still
+			// running. The marker only records startApp's return and cannot
+			// decide whether this launch has reached its public threshold.
+			Json session = probeSession(worker, deadline);
+			if (session != null) {
+				lastSession = WorkerDiagnostics.stripImage(session);
+				if (session.at("ready", false).asBoolean()
+					|| (session.has("displayable") && !session.at("displayable").isNull())
+					|| (session.has("permissionRequest") && !session.at("permissionRequest").isNull())) {
+					return session;
 				}
 			}
-		} finally {
-			watchService.close();
+			long remaining = deadline.remainingMillis();
+			if (remaining > 0L) {
+				Thread.sleep(Math.min(remaining, SESSION_PROBE_INTERVAL_MS));
+			}
+		}
+		if (!worker.process.isAlive()) {
+			throw workerExitFailure(worker);
 		}
 
 		Json timeoutDetails = Json.object()
 			.set("timeoutMs", timeoutMs)
-			.set("elapsedMs", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
-			.set("readyPath", worker.readyPath.toString());
+			.set("elapsedMs", deadline.elapsedMillis())
+			.set("reason", "first-display-timeout")
+			.set("workerRetained", true);
+		if (lastSession != null) {
+			timeoutDetails.set("lastSession", lastSession);
+		}
 		String causeHint = causeHintFromLog(worker);
 		if (causeHint != null) {
 			timeoutDetails.set("causeHint", causeHint);

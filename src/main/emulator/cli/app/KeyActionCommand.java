@@ -1,18 +1,17 @@
 package emulator.cli.app;
 
 import emulator.cli.core.CliErrorCodes;
+import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationLimits;
-import emulator.cli.controller.ControllerCalls;
-import emulator.cli.controller.ControllerLifecycle;
-import emulator.cli.controller.ControllerStatus;
-import emulator.cli.controller.ControllerStatusService;
+import emulator.automation.shared.OperationDeadline;
+import emulator.cli.controller.ControllerClient;
 import emulator.cli.core.CliCommand;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
 import emulator.cli.core.KemuCliException;
-import emulator.cli.output.CliResponses;
 import emulator.cli.parse.CliParsing;
+import java.util.Locale;
 import mjson.Json;
 
 public final class KeyActionCommand implements CliCommand {
@@ -40,14 +39,17 @@ public final class KeyActionCommand implements CliCommand {
 			throw usage(json);
 		}
 		boolean halfStroke = "down".equals(action) || "up".equals(action);
-		String key = invocation.tokens().get(2);
+		int keyIndex = "--".equals(invocation.tokens().get(2)) ? 3 : 2;
+		if (keyIndex >= invocation.tokens().size()
+			|| keyIndex == 3 && invocation.tokens().size() != 4) throw usage(json);
+		String key = invocation.tokens().get(keyIndex);
+		validateKey(key, json);
 		int durationMs = "hold".equals(action)
 			? AutomationLimits.DEFAULT_KEY_HOLD_DURATION_MS
 			: AutomationLimits.DEFAULT_KEY_PRESS_DURATION_MS;
 		boolean sawDuration = false;
-		boolean waitDispatched = false;
-		boolean waitRelease = false;
-		for (int i = 3; i < invocation.tokens().size(); i++) {
+		boolean observe = false;
+		for (int i = keyIndex + 1; i < invocation.tokens().size(); i++) {
 			String token = invocation.tokens().get(i);
 			if ("--duration".equals(token) && !halfStroke) {
 				if (sawDuration) {
@@ -69,39 +71,34 @@ public final class KeyActionCommand implements CliCommand {
 					"--duration",
 					"key " + action,
 					json);
-			} else if ("--wait-dispatched".equals(token)) {
-				if (waitDispatched) {
+			} else if ("--observe".equals(token)) {
+				if (observe) {
 					throw CliParsing.duplicateOption(token, "key " + action, json);
 				}
-				waitDispatched = true;
-			} else if ("--wait-release".equals(token) && "hold".equals(action)) {
-				if (waitRelease) {
-					throw CliParsing.duplicateOption(token, "key " + action, json);
-				}
-				waitRelease = true;
+				observe = true;
 			} else {
 				throw usage(json);
 			}
 		}
 		Json request = Json.object()
 			.set("key", key)
-			.set("waitDispatched", waitDispatched);
+			.set("waitDispatched", true);
 		if (!halfStroke) {
 			request.set("durationMs", durationMs);
-			request.set("waitRelease", waitRelease);
 		}
 
+		OperationDeadline deadline = invocation.deadline(AutomationLimits.DEFAULT_TIMEOUT_MS);
 		String operation = halfStroke ? "app.key." + action : "app.key";
-		ControllerStatus status = ControllerLifecycle.requireRunningController("key " + action, json);
-		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
-			ControllerStatusService.controllerClient(status),
-			operation,
-			request,
-			"key " + action,
-			json));
-		String text = halfStroke
-			? ("down".equals(action) ? "Key down: " : "Key up: ") + key + "."
-			: "Pressed " + key + ".";
-		return new CommandResult("key " + action, text, payload, json);
+		ControllerClient client = AgentCalls.client(invocation, "key " + action, deadline);
+		Json payload = AgentCalls.call(invocation, client, deadline, operation, request, "key " + action);
+		payload = AgentCalls.afterAction(invocation, client, deadline, "key " + action, payload, observe);
+		return new CommandResult("key " + action, payload, json);
+	}
+
+	private void validateKey(String key, boolean json) {
+		String normalized = key.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+		if (normalized.matches("(?:NUM_?)?[0-9]|\\*|#|STAR|POUND|HASH|UP|DOWN|LEFT|RIGHT|FIRE|MIDDLE|OK|LSK|RSK|SOFT_LEFT|SOFT_RIGHT|S1|S2")) return;
+		throw new KemuCliException(AutomationErrorCodes.UNKNOWN_KEY, "Unknown key: " + key,
+			"key " + action, json, Json.object().set("key", key));
 	}
 }

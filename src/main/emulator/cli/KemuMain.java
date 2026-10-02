@@ -5,7 +5,8 @@ import emulator.cli.app.*;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
 import emulator.cli.library.*;
-import emulator.cli.output.CliResponses;
+import emulator.cli.output.PublicResult;
+import emulator.cli.output.CliTextRenderer;
 import mjson.Json;
 
 public final class KemuMain {
@@ -15,30 +16,25 @@ public final class KemuMain {
 	}
 
 	public static void main(String[] args) {
-		boolean json = containsJsonFlag(args);
+		boolean json = CliApp.flagRequested(args, "--json");
+		boolean verbose = CliApp.flagRequested(args, "--verbose");
 		try {
 			CommandResult result = CLI_APP.run(args);
-			if (result.json) {
-				writeJson(CliResponses.successEnvelope(result.commandName, result.payload));
-			} else if (result.text != null && result.text.length() > 0) {
-				System.out.println(result.text);
-			}
-
-			System.exit(CliExitCodes.OK);
+			if (result.streamed) { System.exit(CliExitCodes.OK); return; }
+			Json envelope = PublicResult.envelope(result);
+		if (result.json) writeJson(envelope);
+		else if ("logs".equals(result.commandName) && result.payload.at("jsonl", false).asBoolean()) {
+			for (Json line : envelope.at("result").at("lines", Json.array()).asJsonList()) writeJson(line);
+		} else System.out.println(CliTextRenderer.render(envelope));
+			System.exit("pending".equals(envelope.at("outcome").asString()) ? 5 : CliExitCodes.OK);
 		} catch (KemuCliException e) {
-			if (json || e.json) {
-				writeJson(CliResponses.errorEnvelope(e.commandName, e.code, e.getMessage(), e.payload));
-			} else {
-				System.err.println("Error: " + e.getMessage());
-			}
+			Json envelope = PublicResult.error(e.commandName, e.code, e.getMessage(), e.payload, verbose);
+			if (json || e.json) writeJson(envelope); else System.err.println(CliTextRenderer.render(envelope));
 
 			System.exit(e.exitCode);
 		} catch (Exception e) {
-			if (json) {
-				writeJson(CliResponses.errorEnvelope(null, CliErrorCodes.INTERNAL_ERROR, e.toString(), null));
-			} else {
-				e.printStackTrace(System.err);
-			}
+			Json envelope = PublicResult.error(null, CliErrorCodes.INTERNAL_ERROR, e.toString(), null, verbose);
+			if (json) writeJson(envelope); else System.err.println(CliTextRenderer.render(envelope));
 
 			System.exit(CliExitCodes.RUNTIME);
 		}
@@ -51,23 +47,19 @@ public final class KemuMain {
 		registry.add(helpCommand);
 		registry.add(bridgeCommand);
 		registry.add(new StatusCommand());
-		registry.add(new StartCommand());
 		registry.add(new StopCommand());
 		registry.add(new LogsCursorCommand());
 		registry.add(new LogsReadCommand());
 		registry.add(new InspectCommand());
 		registry.add(new OpenCommand());
 		registry.add(new CloseCommand());
-		registry.add(new StateCommand());
-		registry.add(new ObserveCommand());
+		registry.add(new AgentObserveCommand());
+		registry.add(new AgentRefCommand("activate"));
+		registry.add(new AgentRefCommand("select"));
+		registry.add(new AgentRefCommand("set"));
 		registry.add(new ScreenshotCommand());
-		registry.add(new ConditionWaitCommand("display"));
-		registry.add(new ConditionWaitCommand("worker-ready"));
-		registry.add(new ConditionWaitCommand("worker-exit"));
-		registry.add(new ConditionWaitCommand("idle"));
-		registry.add(new ConditionWaitCommand("frame"));
-		registry.add(new ConditionWaitCommand("permission"));
-		registry.add(new WaitLogCommand());
+		for (String type : new String[]{"screen", "ready", "exit", "frame", "permission", "log"})
+			registry.add(new AgentWaitCommand(type));
 		registry.add(new KeyActionCommand("press"));
 		registry.add(new KeyActionCommand("hold"));
 		registry.add(new KeyActionCommand("down"));
@@ -76,25 +68,16 @@ public final class KemuMain {
 		registry.add(new PointerActionCommand("down"));
 		registry.add(new PointerActionCommand("up"));
 		registry.add(new DragCommand());
-		registry.add(new LcduiControlCommand("list", "select"));
-		registry.add(new LcduiControlCommand("list", "move"));
-		registry.add(new LcduiControlCommand("choice", "set"));
-		registry.add(new LcduiControlCommand("gauge", "set"));
-		registry.add(new LcduiControlCommand("text-field", "set"));
-		registry.add(new LcduiControlCommand("text-box", "set"));
-		registry.add(new LcduiControlCommand("date-field", "set"));
 		registry.add(new AppLifecycleCommand("pause"));
 		registry.add(new AppLifecycleCommand("resume"));
 		registry.add(new ScreenSizeCommand(false));
 		registry.add(new ScreenSizeCommand(true));
-		registry.add(new RunUiCommand());
 		registry.add(new PermissionCommand());
-		registry.add(new EventsReadCommand());
 		registry.add(new SessionStorageCommand("rms", "reset"));
 		registry.add(new SessionStorageCommand("rms", "export"));
 		registry.add(new SessionStorageCommand("rms", "import"));
-		registry.add(new SessionStorageCommand("state", "snapshot"));
-		registry.add(new SessionStorageCommand("state", "restore"));
+		registry.add(new SessionStorageCommand("storage", "snapshot"));
+		registry.add(new SessionStorageCommand("storage", "restore"));
 
 		CliApp app = new CliApp(registry, helpCommand);
 		bridgeCommand.attach(app);
@@ -106,13 +89,4 @@ public final class KemuMain {
 		System.out.println(json.toString());
 	}
 
-	private static boolean containsJsonFlag(String[] args) {
-		for (String arg : args) {
-			if ("--json".equals(arg)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
 }

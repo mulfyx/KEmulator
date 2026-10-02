@@ -38,6 +38,7 @@ final class ChoiceImpl
 		Image img;
 		Font font;
 		boolean sel;
+		Object automationIdentity = new Object();
 
 		ChoiceData(String text, Image img, Font font, boolean sel)
 		{
@@ -136,6 +137,7 @@ final class ChoiceImpl
 		ChoiceData data = (ChoiceData) items.elementAt(elementNum);
 		data.text = text;
 		data.img = image;
+		data.automationIdentity = new Object();
 	}
 
 	/**
@@ -350,6 +352,11 @@ final class ChoiceImpl
 	synchronized int size()
 	{
 		return items.size();
+	}
+
+	synchronized Object automationIdentity(int index) {
+		validatePosition(index, size());
+		return ((ChoiceData) items.elementAt(index)).automationIdentity;
 	}
 
 	/**

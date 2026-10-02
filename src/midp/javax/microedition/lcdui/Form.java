@@ -38,6 +38,7 @@ public class Form extends Screen {
 				}
 				super.items.add(item);
 				item.screen = this;
+				item.automationOwnerGeneration++;
 			}
 		}
 	}
@@ -52,6 +53,7 @@ public class Form extends Screen {
 			}
 			super.items.add(item);
 			item.screen = this;
+			item.automationOwnerGeneration++;
 			queueLayout(items.size() - 1);
 			AutomationWorkerRuntime.onDisplayStateChanged("form-items-changed");
 			return super.items.size() - 1;
@@ -76,6 +78,7 @@ public class Form extends Screen {
 		synchronized (items) {
 			super.items.insertElementAt(item, n);
 			item.screen = this;
+			item.automationOwnerGeneration++;
 		}
 		queueLayout(n);
 		AutomationWorkerRuntime.onDisplayStateChanged("form-items-changed");
@@ -91,6 +94,7 @@ public class Form extends Screen {
 			if (item == scrollCurrentItem) scrollCurrentItem = null;
 			if (item == scrollTargetItem) scrollTargetItem = null;
 			item.screen = null;
+			item.automationOwnerGeneration++;
 			super.items.remove(n);
 		}
 		queueLayout(n - 1);
@@ -101,6 +105,7 @@ public class Form extends Screen {
 		synchronized (items) {
 			for (Object item : super.items) {
 				((Item) item).screen = null;
+				((Item) item).automationOwnerGeneration++;
 			}
 			super.items.removeAllElements();
 		}
@@ -125,8 +130,10 @@ public class Form extends Screen {
 			if (prev == scrollCurrentItem) scrollCurrentItem = null;
 			if (prev == scrollTargetItem) scrollTargetItem = null;
 			prev.screen = null;
+			prev.automationOwnerGeneration++;
 			super.items.set(n, item);
 			item.screen = this;
+			item.automationOwnerGeneration++;
 		}
 		queueLayout(n);
 		AutomationWorkerRuntime.onDisplayStateChanged("form-items-changed");

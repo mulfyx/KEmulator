@@ -1,16 +1,14 @@
 package emulator.cli.app;
 
-import emulator.cli.controller.ControllerCalls;
-import emulator.cli.controller.ControllerLifecycle;
-import emulator.cli.controller.ControllerStatus;
-import emulator.cli.controller.ControllerStatusService;
+import emulator.automation.shared.AutomationLimits;
+import emulator.automation.shared.OperationDeadline;
+import emulator.cli.controller.ControllerClient;
 import emulator.cli.core.CliCommand;
 import emulator.cli.core.CliErrorCodes;
 import emulator.cli.core.CliInvocation;
 import emulator.cli.core.CommandPath;
 import emulator.cli.core.CommandResult;
 import emulator.cli.core.KemuCliException;
-import emulator.cli.output.CliResponses;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
 import mjson.Json;
@@ -47,28 +45,32 @@ public final class PointerActionCommand implements CliCommand {
 			throw usage(json);
 		}
 
-		int x = CliParsing.parseIntegerArgument(invocation.tokens().get(2), "<x>", commandName(), json);
-		int y = CliParsing.parseIntegerArgument(invocation.tokens().get(3), "<y>", commandName(), json);
-		boolean waitDispatched = false;
-		for (int i = 4; i < invocation.tokens().size(); i++) {
-			if (!"--wait-dispatched".equals(invocation.tokens().get(i))) {
+		int coordinateIndex = "--".equals(invocation.tokens().get(2)) ? 3 : 2;
+		if (invocation.tokens().size() < coordinateIndex + 2
+			|| coordinateIndex == 3 && invocation.tokens().size() != 5) throw usage(json);
+		int x = CliParsing.parseIntegerArgument(invocation.tokens().get(coordinateIndex), "<x>", commandName(), json);
+		int y = CliParsing.parseIntegerArgument(invocation.tokens().get(coordinateIndex + 1), "<y>", commandName(), json);
+		CliParsing.requireInclusiveRange(x, 0, Integer.MAX_VALUE, "<x>", commandName(), json);
+		CliParsing.requireInclusiveRange(y, 0, Integer.MAX_VALUE, "<y>", commandName(), json);
+		boolean observe = false;
+		for (int i = coordinateIndex + 2; i < invocation.tokens().size(); i++) {
+			if (!"--observe".equals(invocation.tokens().get(i))) {
 				throw usage(json);
 			}
-			if (waitDispatched) {
-				throw CliParsing.duplicateOption("--wait-dispatched", commandName(), json);
+			if (observe) {
+				throw CliParsing.duplicateOption("--observe", commandName(), json);
 			}
-			waitDispatched = true;
+			observe = true;
 		}
 
-		ControllerStatus status = ControllerLifecycle.requireRunningController(commandName(), json);
-		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
-			ControllerStatusService.controllerClient(status),
+		OperationDeadline deadline = invocation.deadline(AutomationLimits.DEFAULT_TIMEOUT_MS);
+		ControllerClient client = AgentCalls.client(invocation, commandName(), deadline);
+		Json payload = AgentCalls.call(invocation, client, deadline,
 			"app.pointer." + action,
-			Json.object().set("x", x).set("y", y).set("waitDispatched", waitDispatched),
-			commandName(),
-			json));
+			Json.object().set("x", x).set("y", y).set("waitDispatched", true), commandName());
+		payload = AgentCalls.afterAction(invocation, client, deadline, commandName(), payload, observe);
 
 		return new CommandResult(
-			commandName(), "Pointer " + action + " at " + x + "," + y + ".", payload, json);
+			commandName(), payload, json);
 	}
 }

@@ -38,6 +38,8 @@ public abstract class Item {
 	String label;
 	String[] labelArr;
 	Screen screen;
+	long automationOwnerGeneration;
+	final java.util.IdentityHashMap<Command, Object> automationCommands = new java.util.IdentityHashMap<Command, Object>();
 	int layout;
 	int preferredWidth = -1;
 	int preferredHeight = -1;
@@ -95,9 +97,13 @@ public abstract class Item {
 			}
 
 			this.commands.add(i, command);
+			synchronized (automationCommands) {
+				automationCommands.put(command, new Object());
+			}
 			if (this.screen != null && Emulator.getCurrentDisplay().getCurrent() == this.screen) {
 				this.screen.updateCommands();
 			}
+			AutomationWorkerRuntime.onDisplayStateChanged("commands-changed");
 
 		}
 	}
@@ -109,9 +115,13 @@ public abstract class Item {
 			}
 
 			this.commands.remove(command);
+			synchronized (automationCommands) {
+				automationCommands.remove(command);
+			}
 			if (this.screen != null && Emulator.getCurrentDisplay().getCurrent() == this.screen) {
 				this.screen.updateCommands();
 			}
+			AutomationWorkerRuntime.onDisplayStateChanged("commands-changed");
 		}
 
 	}

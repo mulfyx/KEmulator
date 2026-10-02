@@ -4,6 +4,7 @@ import emulator.Emulator;
 import emulator.EventQueue;
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
+import emulator.automation.shared.OperationDeadline;
 import emulator.ui.TargetedCommand;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -20,6 +21,110 @@ final class WorkerCommands {
 	private static long nextInvocationId = 1L;
 
 	private WorkerCommands() {
+	}
+
+	interface NativeAction {
+		Json apply();
+	}
+
+	/** Guard, mutation and callback share one LCDUI queue entry. */
+	static Json dispatchNative(final Json request, final String operation, final String ref,
+			final NativeAction action) {
+		final OperationDeadline deadline = OperationDeadline.fromRequest(request, 5000L);
+		final Json receipt = Json.object().set("operation", operation).set("ref", ref);
+		final Json notAdmitted = Json.object().set("admitted", false).set("performed", false)
+			.set("effectUnknown", false).set("effect", "none").set("action", receipt);
+		final EventQueue queue = Emulator.getEventQueue();
+		if (queue == null) throw new AutomationException(AutomationErrorCodes.APP_INPUT_UNAVAILABLE,
+			"LCDUI event queue is not available", notAdmitted);
+		WorkerPermissions.PendingPermission blocked = WorkerPermissions.snapshot();
+		if (blocked != null) throw new AutomationException(AutomationErrorCodes.INPUT_BLOCKED,
+			"Answer the current permission before submitting another action",
+			notAdmitted.set("permissionRequest", blocked.toJson()));
+		if (deadline.timedOut()) throw new AutomationException(AutomationErrorCodes.TIMEOUT,
+			"Action deadline expired before dispatch", notAdmitted
+				.set("timeoutMs", deadline.timeoutMillis()).set("elapsedMs", deadline.elapsedMillis()));
+		final long invocationId = nextInvocationId();
+		final java.util.concurrent.CountDownLatch completed = new java.util.concurrent.CountDownLatch(1);
+		final java.util.concurrent.atomic.AtomicBoolean started = new java.util.concurrent.atomic.AtomicBoolean();
+		final Json[] applied = new Json[1];
+		final Throwable[] failure = new Throwable[1];
+		long cursor = WorkerEventModel.cursor();
+		queue.callSerially(new Runnable() {
+			public void run() {
+				started.set(true);
+				try {
+					applied[0] = action.apply();
+				} catch (Throwable error) {
+					failure[0] = error;
+				} finally {
+					completed.countDown();
+					WorkerEventModel.stateChanged(failure[0] == null ? "command-finished" : "command-failed",
+						Json.object().set("invocationId", invocationId).set("operation", operation).set("ref", ref));
+				}
+			}
+		});
+		try {
+			while (completed.getCount() != 0L) {
+				WorkerPermissions.PendingPermission permission = WorkerPermissions.snapshot();
+				if (started.get() && permission != null) {
+					Json pending = Json.object().set("pending", true).set("status", "pending-permission")
+						.set("action", receipt).set("admitted", true).set("performed", Json.nil())
+						.set("effectUnknown", true).set("permissionRequest", permission.toJson());
+					try {
+						pending.set("state", WorkerSessionSnapshot.build(false, deadline.remainingMillis()));
+					} catch (RuntimeException unavailable) {
+						pending.set("snapshotError", Json.object()
+							.set("code", unavailable instanceof AutomationException
+								? ((AutomationException) unavailable).code : AutomationErrorCodes.WORKER_FAILURE)
+							.set("message", unavailable.getMessage()));
+					}
+					return pending.set("elapsedMs", deadline.elapsedMillis());
+				}
+				long remainingMs = deadline.remainingMillis();
+				if (remainingMs == 0L) throw new AutomationException(AutomationErrorCodes.TIMEOUT,
+					"Timed out waiting for LCDUI action; observe before retrying",
+					Json.object().set("effect", "unknown").set("queued", true).set("admitted", true)
+						.set("effectUnknown", true).set("performed", Json.nil())
+						.set("started", started.get()).set("action", receipt)
+						.set("timeoutMs", deadline.timeoutMillis()).set("elapsedMs", deadline.elapsedMillis()));
+				WorkerEventModel.awaitEventAfter(cursor, remainingMs);
+				cursor = WorkerEventModel.cursor();
+			}
+		} catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			throw new AutomationException(AutomationErrorCodes.WORKER_FAILURE,
+				"Interrupted while waiting for LCDUI action",
+				Json.object().set("effect", "unknown").set("action", receipt).set("admitted", true)
+					.set("effectUnknown", true).set("performed", Json.nil()).set("queued", true)
+					.set("started", started.get()).set("timeoutMs", deadline.timeoutMillis())
+					.set("elapsedMs", deadline.elapsedMillis()), interrupted);
+		}
+		if (failure[0] != null) {
+			if (failure[0] instanceof AutomationException) throw (AutomationException) failure[0];
+			throw new AutomationException(AutomationErrorCodes.WORKER_FAILURE,
+				"LCDUI action failed: " + failure[0].getMessage(),
+				Json.object().set("errorType", failure[0].getClass().getName()).set("action", receipt), failure[0]);
+		}
+		if (applied[0] != null) {
+			for (Map.Entry<String, Json> fact : applied[0].asJsonMap().entrySet()) receipt.set(fact.getKey(), fact.getValue());
+		}
+		try {
+			Json state = WorkerSessionSnapshot.build(false, deadline.remainingMillis());
+			return Json.object().set("action", receipt).set("elapsedMs", deadline.elapsedMillis())
+				.set("admitted", true).set("performed", true).set("effectUnknown", false).set("state", state);
+		} catch (RuntimeException unavailable) {
+			AutomationException snapshotFailure = unavailable instanceof AutomationException
+				? (AutomationException) unavailable : null;
+			Json details = snapshotFailure != null && snapshotFailure.details != null
+					&& snapshotFailure.details.isObject() ? snapshotFailure.details.dup() : Json.object();
+			details.set("action", receipt).set("admitted", true).set("performed", true)
+				.set("effectUnknown", false).set("effect", "applied")
+				.set("timeoutMs", deadline.timeoutMillis()).set("elapsedMs", deadline.elapsedMillis());
+			throw new AutomationException(snapshotFailure == null ? AutomationErrorCodes.WORKER_FAILURE : snapshotFailure.code,
+				"LCDUI action completed, but its observation is unavailable: " + unavailable.getMessage(),
+				details, unavailable);
+		}
 	}
 
 	static void invalidate() {

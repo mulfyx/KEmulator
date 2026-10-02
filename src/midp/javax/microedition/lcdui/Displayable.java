@@ -19,6 +19,7 @@ public class Displayable {
 	public static final int H = 3;
 	String title;
 	Vector commands;
+	final java.util.IdentityHashMap<Command, Object> automationCommands = new java.util.IdentityHashMap<Command, Object>();
 	CommandListener cmdListener;
 	Item focusedItem;
 	int w;
@@ -158,6 +159,9 @@ public class Displayable {
 			return;
 		}
 		this.commands.add(command);
+		synchronized (automationCommands) {
+			automationCommands.put(command, new Object());
+		}
 		if (isShown()) {
 			this.updateCommands();
 		}
@@ -167,6 +171,9 @@ public class Displayable {
 	public void removeCommand(final Command command) {
 		if (this.commands.contains(command)) {
 			this.commands.remove(command);
+			synchronized (automationCommands) {
+				automationCommands.remove(command);
+			}
 			if (isShown()) {
 				updateCommands();
 			}

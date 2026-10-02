@@ -1,10 +1,9 @@
 package emulator.cli.app;
 
-import emulator.automation.shared.AutomationErrorCodes;
+import emulator.automation.shared.OperationDeadline;
 import emulator.cli.core.CliErrorCodes;
 import emulator.cli.controller.*;
 import emulator.cli.core.*;
-import emulator.cli.output.CliResponses;
 import emulator.cli.output.CliTextRenderer;
 import emulator.cli.parse.CliParsing;
 import java.io.IOException;
@@ -19,7 +18,9 @@ public final class ScreenshotCommand implements CliCommand {
 	}
 
 	public CommandResult run(CliInvocation invocation) throws Exception {
-		if (invocation.tokens().size() != 2) {
+		int pathIndex = invocation.tokens().size() > 1 && "--".equals(invocation.tokens().get(1)) ? 2 : 1;
+		if (invocation.tokens().size() != 1 && (invocation.tokens().size() != pathIndex + 1
+			|| pathIndex == 1 && invocation.tokens().get(pathIndex).startsWith("--"))) {
 			throw new KemuCliException(
 				CliErrorCodes.USAGE_ERROR,
 				CliTextRenderer.usageText("screenshot"),
@@ -27,18 +28,13 @@ public final class ScreenshotCommand implements CliCommand {
 				invocation.json());
 		}
 
-		Path out = CliParsing.resolveUserPath(invocation.tokens().get(1));
+		Path out = invocation.tokens().size() == 1 ? null : CliParsing.resolveUserPath(invocation.tokens().get(pathIndex));
+		OperationDeadline deadline = invocation.deadline(10000L);
+		ControllerClient client = ControllerStatusService.controllerClient(
+			ControllerLifecycle.requireRunningController("screenshot", invocation.json(), deadline));
+		Json payload = AgentCalls.observe(invocation, client, deadline, "screenshot", out, true);
 
-		ControllerStatus status = ControllerLifecycle.requireRunningController("screenshot", invocation.json());
-		Json payload = CliResponses.normalizePublicJson(ControllerCalls.callController(
-			ControllerStatusService.controllerClient(status),
-			"app.screenshot",
-			Json.object(),
-			"screenshot",
-			invocation.json()));
-		saveImage(payload, out, "screenshot", invocation.json());
-
-		return new CommandResult("screenshot", out.toString(), payload, invocation.json());
+		return new CommandResult("screenshot", payload, invocation.json());
 	}
 
 	/**

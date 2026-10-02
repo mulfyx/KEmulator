@@ -56,22 +56,15 @@ final class ControllerRuntimeResolver {
 	}
 
 	private static boolean isCommandAvailable(String command) {
-		try {
-			Process process = new ProcessBuilder(
-				ControllerStatusService.isWindows()
-					? new String[]{"where", command}
-					: new String[]{"sh", "-lc", "command -v \"$1\" >/dev/null 2>&1", "sh", command})
-				.start();
-			try {
-				return process.waitFor() == 0;
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-
-				return false;
-			}
-		} catch (IOException e) {
-			return false;
+		java.nio.file.Path direct = java.nio.file.Paths.get(command);
+		if (direct.isAbsolute()) return Files.isRegularFile(direct) && Files.isExecutable(direct);
+		String searchPath = System.getenv("PATH");
+		if (searchPath == null) return false;
+		for (String directory : searchPath.split(java.util.regex.Pattern.quote(File.pathSeparator), -1)) {
+			java.nio.file.Path candidate = java.nio.file.Paths.get(directory).resolve(command);
+			if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) return true;
 		}
+		return false;
 	}
 
 	private static String joinClasspath(String... entries) {

@@ -11,7 +11,9 @@ public final class CliErrorMapping {
 			return CliExitCodes.RUNTIME;
 		}
 
-		if (AutomationErrorCodes.PATH_NOT_FOUND.equals(code)) {
+		if (AutomationErrorCodes.PATH_NOT_FOUND.equals(code)
+			|| CliErrorCodes.STORAGE_ERROR.equals(code)
+			|| CliErrorCodes.SCREENSHOT_WRITE_FAILED.equals(code)) {
 			return CliExitCodes.NOT_FOUND;
 		}
 
@@ -25,6 +27,8 @@ public final class CliErrorMapping {
 			|| AutomationErrorCodes.UNKNOWN_KEY.equals(code)
 			|| AutomationErrorCodes.UNKNOWN_COMMAND_ID.equals(code)
 			|| AutomationErrorCodes.STALE_REVISION.equals(code)
+			|| AutomationErrorCodes.STALE_REF.equals(code)
+			|| AutomationErrorCodes.UNSUPPORTED_ACTION.equals(code)
 			|| AutomationErrorCodes.UNKNOWN_PERMISSION_ID.equals(code)
 			|| AutomationErrorCodes.PERMISSION_ORDER_VIOLATION.equals(code)
 			|| AutomationErrorCodes.STORAGE_OVERLAP.equals(code)

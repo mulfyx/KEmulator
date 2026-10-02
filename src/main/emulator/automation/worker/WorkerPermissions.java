@@ -1,6 +1,8 @@
 package emulator.automation.worker;
 
 import emulator.Permission;
+import emulator.Emulator;
+import emulator.EventQueue;
 import emulator.automation.shared.AutomationErrorCodes;
 import emulator.automation.shared.AutomationException;
 import java.util.HashMap;
@@ -22,13 +24,17 @@ final class WorkerPermissions {
 		final int id;
 		final String name;
 		final String message;
+		final int inputSequence;
+		final Object lifecycleOperation;
 		private final Object lock = new Object();
 		private int response = -1;
 
-		private PendingPermission(int id, String name, String message) {
+		private PendingPermission(int id, String name, String message, int inputSequence, Object lifecycleOperation) {
 			this.id = id;
 			this.name = name;
 			this.message = message;
+			this.inputSequence = inputSequence;
+			this.lifecycleOperation = lifecycleOperation;
 		}
 
 		boolean await() {
@@ -65,7 +71,8 @@ final class WorkerPermissions {
 		}
 
 		Json toJson() {
-			return Json.object().set("id", id).set("name", name).set("message", message);
+			return Json.object().set("ref", WorkerTargets.permissionRef(this))
+				.set("id", id).set("name", name).set("message", message);
 		}
 	}
 
@@ -141,12 +148,33 @@ final class WorkerPermissions {
 			.set("mode", mode);
 	}
 
+	static PendingPermission snapshotForInput(int[] sequences) {
+		synchronized (LOCK) {
+			PendingPermission permission = snapshot();
+			if (permission != null) {
+				for (int sequence : sequences) {
+					if (sequence > 0 && sequence == permission.inputSequence) {
+						return permission;
+					}
+				}
+			}
+			return null;
+		}
+	}
+
+	static PendingPermission snapshotForLifecycle(Object operation) {
+		PendingPermission permission = snapshot();
+		return permission != null && permission.lifecycleOperation == operation ? permission : null;
+	}
+
 	static boolean request(String name, String message) {
 		if (WorkerRuntimeState.isShutdownRequested()) {
 			return false;
 		}
 
-		PendingPermission request = new PendingPermission(nextPermissionId(), name, message);
+		EventQueue queue = Emulator.getEventQueue();
+		PendingPermission request = new PendingPermission(nextPermissionId(), name, message,
+			queue == null ? 0 : queue.currentInputSequence(), queue == null ? null : queue.currentLifecycleOperation());
 		synchronized (LOCK) {
 			if (WorkerRuntimeState.isShutdownRequested()) {
 				return false;

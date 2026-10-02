@@ -1,162 +1,88 @@
-"""Half-stroke input (chords, holds), MIDlet lifecycle, date-field, and the
-title-regex wait — the roadmap gaps closed after the contract sweep."""
-
+"""Separate down/up strokes, lifecycle, dates and observation captures."""
 import re
+from kemu import png_size, walk_nodes
 
 
 def test_key_down_up_supports_chords(kemu, fixtures):
     kemu.open_ready(fixtures["INPUT_PROBE_JAR"])
-    assert kemu.title().startswith("keys=[]")
-
-    kemu.ok("key", "down", "LEFT", "--wait-dispatched")
-    kemu.ok("key", "down", "UP", "--wait-dispatched")
+    kemu.ok("key", "down", "LEFT")
+    kemu.ok("key", "down", "UP")
     held = re.search(r"keys=\[([^\]]*)\]", kemu.title()).group(1).split(",")
-    assert set(held) == {"LEFT", "UP"}  # both keys held at the same time
-
-    kemu.ok("key", "up", "LEFT", "--wait-dispatched")
+    assert set(held) == {"LEFT", "UP"}
+    kemu.ok("key", "up", "LEFT")
     assert re.search(r"keys=\[([^\]]*)\]", kemu.title()).group(1) == "UP"
-
-    kemu.ok("key", "up", "UP", "--wait-dispatched")
+    kemu.ok("key", "up", "UP")
     assert kemu.title().startswith("keys=[]")
 
 
 def test_pointer_down_up_supports_holds(kemu, fixtures):
     kemu.open_ready(fixtures["INPUT_PROBE_JAR"])
-
-    kemu.ok("pointer", "down", "30", "40", "--wait-dispatched")
+    kemu.ok("pointer", "down", "30", "40")
     assert "pointer=down@30,40" in kemu.title()
-
-    kemu.ok("pointer", "up", "35", "45", "--wait-dispatched")
+    kemu.ok("pointer", "up", "35", "45")
     assert "pointer=up@35,45" in kemu.title()
 
 
 def test_pause_and_resume_drive_the_midlet_lifecycle(kemu, fixtures):
-    kemu.open_ready(fixtures["LIFECYCLE_JAR"])
-    assert kemu.title() == "lifecycle started=1 paused=0"
-    assert kemu.state_of()["paused"] is False
-
+    opened = kemu.open_ready(fixtures["LIFECYCLE_JAR"])
+    assert kemu.title(opened) == "lifecycle started=1 paused=0"
     paused = kemu.ok("pause")
-    assert paused["paused"] is True
-    assert paused["newRevision"] > paused["oldRevision"]
-    assert paused["state"]["paused"] is True
-    assert paused["state"]["displayable"]["title"] == "lifecycle started=1 paused=1"
-    assert kemu.title() == "lifecycle started=1 paused=1"
-
+    assert kemu.title(paused) == "lifecycle started=1 paused=1"
     resumed = kemu.ok("resume")
-    assert resumed["paused"] is False
-    assert resumed["state"]["displayable"]["title"] == "lifecycle started=2 paused=1"
-
-    # The app is interactive again after resume.
-    kemu.ok("wait", "idle", "--timeout", "5000")
+    assert kemu.title(resumed) == "lifecycle started=2 paused=1"
+    kemu.ok("wait", "ready", "--timeout", "5000")
 
 
 def test_repeated_pause_and_resume_do_not_leave_pending_lifecycle_events(kemu, fixtures):
     kemu.open_ready(fixtures["LIFECYCLE_JAR"])
-
-    for started, paused_count in ((1, 1), (2, 2)):
+    for started, paused in ((1, 1), (2, 2)):
         kemu.ok("pause")
-        kemu.wait_title(f"lifecycle started={started} paused={paused_count}")
-        repeated_pause = kemu.ok("pause")
-        assert repeated_pause["paused"] is True
-
-        resumed = kemu.ok("resume")
-        expected_title = f"lifecycle started={started + 1} paused={paused_count}"
-        assert resumed["paused"] is False
-
-        # Check recovery before another resume could release a stale pause.
-        idle = kemu.ok("wait", "idle", "--timeout", "5000")
-        assert idle["state"]["paused"] is False
-        assert idle["state"]["displayable"]["title"] == expected_title
-        assert resumed["state"]["displayable"]["title"] == expected_title
-        assert repeated_pause["newRevision"] == repeated_pause["oldRevision"]
-
-        repeated_resume = kemu.ok("resume")
-        assert repeated_resume["paused"] is False
-        assert repeated_resume["newRevision"] == repeated_resume["oldRevision"]
-        idle = kemu.ok("wait", "idle", "--timeout", "5000")
-        assert idle["state"]["paused"] is False
-        assert idle["state"]["displayable"]["title"] == expected_title
+        expected = f"lifecycle started={started} paused={paused}"
+        assert kemu.title(kemu.ok("pause")) == expected
+        expected = f"lifecycle started={started + 1} paused={paused}"
+        assert kemu.title(kemu.ok("resume")) == expected
+        assert kemu.title(kemu.ok("resume")) == expected
+        assert kemu.title(kemu.ok("wait", "ready")) == expected
 
 
 def test_date_field_set(kemu, fixtures):
-    kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
-    items = kemu.state_of()["displayable"]["items"]
-    assert items[-1]["kind"] == "date-field"
-    assert items[-1]["date"] == 0
-
-    epoch_ms = 1785000000000
-    result = kemu.ok("date-field", "set", str(epoch_ms))
-    assert result["date"] == epoch_ms
-    assert result["newRevision"] > result["oldRevision"]
-
-    items = kemu.state_of()["displayable"]["items"]
-    assert items[-1]["date"] == epoch_ms
-    assert items[0]["text"] == f"when={epoch_ms}"  # itemStateChanged fired
-
-    kemu.err("date-field", "set", "-1", code="USAGE_ERROR")
-    kemu.err("date-field", "set", str(epoch_ms), "--expect-revision", "0",
-             code="STALE_REVISION")
+    before = kemu.open_ready(fixtures["FORM_CONTROLS_JAR"])
+    field = kemu.node(before, role="date-field", label="When")
+    assert field["value"] == 0
+    epoch = 1785000000000
+    after = kemu.ok("set", field["ref"], str(epoch))
+    assert kemu.node(after, label="When")["value"] == epoch
+    assert any(n.get("value") == f"when={epoch}" for n in walk_nodes(kemu.state_of(after)["nodes"]))
+    kemu.ok("set", field["ref"], "2026-07-25T12:00:00Z")
+    kemu.err("set", field["ref"], "not-a-date", code="INVALID_REQUEST")
 
 
 def test_wait_display_title_regex(kemu, fixtures):
     kemu.open_ready(fixtures["COMMAND_FIXTURE_JAR"])
     kemu.run_command("Open touch")
-
-    revision = kemu.revision()
-    kemu.ok("resize", "320x240", "--expect-revision", str(revision),
-            "--wait-frame", "--timeout", "10000")
-    # The canvas reports its client size, so the exact title is unknown.
-    matched = kemu.ok("wait", "display", "--title-regex", r"^Size 320x\d+$",
-                      "--timeout", "10000")
-    assert matched["matched"] is True
-    assert re.match(r"^Size 320x\d+$", kemu.title())
-
-    kemu.err("wait", "display", "--title-regex", "[unclosed",
-             "--timeout", "1000", code="INVALID_REQUEST")
+    kemu.ok("resize", "320x240")
+    result = kemu.ok("wait", "screen", "--title-regex", r"^Size 320x\d+$")
+    assert re.match(r"^Size 320x\d+$", kemu.title(result))
+    kemu.err("wait", "screen", "--title-regex", "[unclosed", code="USAGE_ERROR")
 
 
 def test_softkey_only_commands_are_invokable(kemu, fixtures):
-    kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
-    observation = kemu.observe()
-    displayable = kemu.state_of(observation)["displayable"]
-
-    assert displayable["softkeys"]["right"] == "Exit"
-    exit_command = next(
-        command for command in displayable["commands"]
-        if (command.get("label") or command.get("text")) == "Exit")
+    before = kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
+    exit_command = next(c for c in kemu.state_of(before)["commands"] if c["label"] == "Exit")
     assert exit_command["softkey"] == "right"
-    assert exit_command["softkeyOnly"] is True
-
-    # Menu commands stay unmarked.
-    editor = next(
-        command for command in displayable["commands"]
-        if (command.get("label") or command.get("text")) == "Open editor")
-    assert "softkeyOnly" not in editor
-
-    # The softkey-only command is reachable by id, no key press needed.
-    kemu.run(
-        "command", "run",
-        "--id", str(exit_command["id"]),
-        "--expect-revision", str(kemu.revision(observation)))
-    exited = kemu.ok("wait", "worker-exit", "--timeout", "10000")
-    assert exited["matched"] is True
+    kemu.run("activate", exit_command["ref"])
+    kemu.ok("wait", "exit", "--timeout", "10000")
 
 
 def test_observe_with_screenshot_is_atomic(kemu, fixtures, workdir):
-    from kemu import png_size
-
     kemu.open_ready(fixtures["MEGA_CLI_FIXTURE_JAR"])
     capture = workdir / "observe-atomic.png"
     result = kemu.ok("observe", "--screenshot", str(capture))
-
-    assert result["active"] is True
-    assert result["state"]["displayable"]["title"] == "Mega menu"
-    assert result["screenshot"] == {"saved": True, "path": str(capture)}
+    screen = kemu.state_of(result)
+    assert screen["title"] == "Mega menu"
+    assert screen["image"]["path"] == str(capture)
+    assert png_size(capture) == (screen["size"]["width"], screen["size"]["height"])
     assert "imageBase64" not in result
-    assert png_size(capture) == (
-        result["state"]["width"], result["state"]["height"])
-
     kemu.err("observe", "--screenshot", code="USAGE_ERROR")
     kemu.close()
-    kemu.err("observe", "--screenshot", str(workdir / "none.png"),
-             code="NO_ACTIVE_APP")
+    kemu.err("observe", "--screenshot", str(workdir / "none.png"), code="NO_ACTIVE_APP")

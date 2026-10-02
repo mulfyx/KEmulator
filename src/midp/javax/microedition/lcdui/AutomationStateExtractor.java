@@ -74,28 +74,124 @@ public final class AutomationStateExtractor {
 		return displayable == null ? null : displayable.getRightSoftCommand();
 	}
 
-	/**
-	 * The command list automation exposes: the LCDUI menu list plus softkey
-	 * commands that the menu omits (BACK/EXIT-style right softkey), so an
-	 * agent can invoke them by id instead of guessing a key press.
-	 */
+	/** Actual screen and item commands, including unfocused Form items. */
 	public static Vector<TargetedCommand> buildAutomationCommands(Displayable displayable) {
-		Vector<TargetedCommand> commands = buildCommands(displayable);
-		Command rightSoft = getRightSoftCommand(displayable);
-		if (rightSoft == null) {
-			return commands;
-		}
-
-		for (int i = 0; i < commands.size(); i++) {
-			TargetedCommand candidate = commands.get(i);
-			if (candidate != null && candidate.command == rightSoft) {
-				return commands;
+		Vector<TargetedCommand> commands = new Vector<TargetedCommand>();
+		if (displayable == null) return commands;
+		if (displayable instanceof Form) {
+			for (Item item : getFormItems((Form) displayable)) {
+				Command[] itemCommands;
+				synchronized (item.commands) {
+					itemCommands = item.commands.toArray(new Command[0]);
+				}
+				for (Command command : itemCommands) commands.add(new TargetedCommand(command, item));
 			}
 		}
-
-		commands.add(new TargetedCommand(rightSoft, displayable));
-
+		Command[] screenCommands;
+		synchronized (displayable.commands) {
+			screenCommands = (Command[]) displayable.commands.toArray(new Command[0]);
+		}
+		for (Command command : screenCommands) commands.add(new TargetedCommand(command, displayable));
+		if (displayable instanceof List && getListType((List) displayable) == Choice.IMPLICIT) {
+			Command select = ((List) displayable)._getSelectCommand();
+			if (select != null && !displayable.commands.contains(select)) {
+				commands.add(new TargetedCommand(select, displayable));
+			}
+		}
 		return commands;
+	}
+
+	public static Item[] getFormItems(Form form) {
+		if (form == null) return new Item[0];
+		synchronized (form.items) {
+			return (Item[]) form.items.toArray(new Item[0]);
+		}
+	}
+
+	public static Object getFormLock(Form form) {
+		return form.items;
+	}
+
+	public static boolean containsItem(Displayable owner, Item item) {
+		if (!(owner instanceof Form) || item == null) return false;
+		Form form = (Form) owner;
+		synchronized (form.items) {
+			return item.screen == owner && form.items.contains(item);
+		}
+	}
+
+	public static long getItemOwnerGeneration(Item item) {
+		return item.automationOwnerGeneration;
+	}
+
+	public static Object getCommandMembership(TargetedCommand target) {
+		if (target == null || target.command == null) return null;
+		if (target.item != null) {
+			synchronized (target.item.automationCommands) {
+				return target.item.commands.contains(target.command)
+					? target.item.automationCommands.get(target.command) : null;
+			}
+		}
+		Displayable owner = target.screen;
+		if (owner == null) return null;
+		synchronized (owner.automationCommands) {
+			if (owner.commands.contains(target.command)) return owner.automationCommands.get(target.command);
+			if (owner instanceof List && getListType((List) owner) == Choice.IMPLICIT
+					&& ((List) owner)._getSelectCommand() == target.command) {
+				return ((List) owner).automationSelectMembership;
+			}
+			return null;
+		}
+	}
+
+	public static boolean hasCommandListener(Displayable displayable) {
+		return displayable != null && displayable.cmdListener != null;
+	}
+
+	public static boolean hasItemCommandListener(Item item) {
+		return item != null && item.itemCommandListener != null;
+	}
+
+	public static boolean isFocused(Item item) {
+		return item != null && item.focused;
+	}
+
+	public static int getListType(List list) {
+		return list == null ? -1 : list.automationChoiceType();
+	}
+
+	public static int getCurrentChoiceIndex(ChoiceGroup choice) {
+		return choice == null ? -1 : choice.automationCurrentIndex();
+	}
+
+	public static Object getChoiceLock(Object collection) {
+		return collection instanceof List ? ((List) collection).automationLock() : collection;
+	}
+
+	public static Object getChoiceRowIdentity(Object collection, int index) {
+		if (collection instanceof List) return ((List) collection).automationRowIdentity(index);
+		return ((ChoiceGroup) collection).items.elementAt(index);
+	}
+
+	public static boolean selectChoiceRow(Object collection, Object identity, int index, boolean selected) {
+		if (collection instanceof List) return ((List) collection).automationSelect(identity, index, selected);
+		ChoiceGroup choice = (ChoiceGroup) collection;
+		synchronized (choice) {
+			if (index < 0 || index >= choice.size() || choice.items.elementAt(index) != identity) return false;
+			choice.setSelectedIndex(index, selected);
+			return true;
+		}
+	}
+
+	public static void invokeCommand(TargetedCommand target) {
+		if (target.item != null) {
+			target.item._callCommandAction(target.command);
+		} else if (target.screen instanceof Alert && target.command == Alert.DISMISS_COMMAND
+				&& target.screen.cmdListener == null) {
+			((Alert) target.screen).close();
+		} else {
+			target.screen._callCommandAction(target.command);
+		}
 	}
 
 	public static int getChoiceType(ChoiceGroup choiceGroup) {

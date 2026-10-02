@@ -11,6 +11,7 @@ public class List extends Screen implements Choice {
 
 	private int type;
 	private Command selectCommand = List.SELECT_COMMAND;
+	Object automationSelectMembership = new Object();
 
 	public List(String s, int n) {
 		this(s, n, new String[0], null);
@@ -39,6 +40,7 @@ public class List extends Screen implements Choice {
 				addCommand(cmd);
 			}
 			selectCommand = cmd;
+			automationSelectMembership = new Object();
 		}
 	}
 
@@ -47,6 +49,7 @@ public class List extends Screen implements Choice {
 		if(cmd == selectCommand)
 		{
 			selectCommand = null;
+			automationSelectMembership = new Object();
 		}
 		super.removeCommand(cmd);
 	}
@@ -242,6 +245,24 @@ public class List extends Screen implements Choice {
 
 	public Command _getSelectCommand() {
 		return selectCommand;
+	}
+
+	Object automationLock() {
+		return impl.automationLock();
+	}
+
+	Object automationRowIdentity(int index) {
+		return impl.automationRowIdentity(index);
+	}
+
+	boolean automationSelect(Object identity, int index, boolean selected) {
+		boolean applied = impl.automationSelect(identity, index, selected);
+		if (applied) AutomationWorkerRuntime.onSelectionChanged(getSelectedIndex());
+		return applied;
+	}
+
+	int automationChoiceType() {
+		return type;
 	}
 
 	public boolean _isSWT() {
